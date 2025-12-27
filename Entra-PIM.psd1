@@ -6,16 +6,16 @@
     RootModule = 'Entra-PIM.psm1'
 
     # Version number of this module (SemVer format for PSResourceGet)
-    ModuleVersion = '1.0.0'
+    ModuleVersion = '1.3.0'
 
     # ID used to uniquely identify this module
     GUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
 
     # Author of this module
-    Author = 'Your Name'
+    Author = 'markorr321'
 
     # Company or vendor of this module
-    CompanyName = 'Your Company'
+    CompanyName = 'Orr365'
 
     # Copyright statement for this module
     Copyright = '(c) 2024. All rights reserved.'
@@ -48,16 +48,25 @@
             Tags = @('Entra', 'PIM', 'Azure', 'Identity', 'Governance', 'MicrosoftGraph', 'Privileged', 'RoleManagement')
 
             # A URL to the license for this module
-            LicenseUri = 'https://github.com/YOUR_USERNAME/Entra-PIM/blob/main/LICENSE'
+            LicenseUri = 'https://github.com/markorr321/Entra-PIM/blob/main/LICENSE'
 
             # A URL to the main website for this project
-            ProjectUri = 'https://github.com/YOUR_USERNAME/Entra-PIM'
+            ProjectUri = 'https://github.com/markorr321/Entra-PIM'
 
             # A URL to an icon representing this module
-            IconUri = 'https://raw.githubusercontent.com/YOUR_USERNAME/Entra-PIM/main/icon.png'
+            IconUri = 'https://raw.githubusercontent.com/markorr321/Entra-PIM/main/icon.png'
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+## 1.3.0
+- Removed Microsoft.Graph.Users dependency
+- Fixed module loading issues
+- Improved error handling for module imports
+
+## 1.2.0
+- Performance optimizations
+- Bug fixes
+
 ## 1.0.0
 - Initial release
 - Browser-based authentication with PKCE

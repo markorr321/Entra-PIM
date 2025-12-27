@@ -3640,43 +3640,43 @@ Write-Host ""
 $requiredGraphModules = @(
     "Microsoft.Graph.Authentication",
     "Microsoft.Graph.Identity.DirectoryManagement",
-    "Microsoft.Graph.Identity.Governance",
-    "Microsoft.Graph.Users"
+    "Microsoft.Graph.Identity.Governance"
 )
 
-$modulesToLoad = $requiredGraphModules | Where-Object { -not (Get-Module -Name $_) }
+Write-Host "Loading Microsoft Graph modules..." -ForegroundColor Cyan
+Write-Host ""
 
-if ($modulesToLoad.Count -gt 0) {
-    $totalModules = $requiredGraphModules.Count
-    $currentModule = 0
-    $barWidth = 30
+$barWidth = 30
+$currentModule = 0
+$totalModules = $requiredGraphModules.Count
+
+foreach ($module in $requiredGraphModules) {
+    $currentModule++
+    $percent = [math]::Floor(($currentModule / $totalModules) * 100)
+    $filled = [math]::Floor(($currentModule / $totalModules) * $barWidth)
+    $empty = $barWidth - $filled
+    $bar = "█" * $filled + "░" * $empty
     
-    Write-Host "Loading Microsoft Graph modules..." -ForegroundColor Cyan
-    Write-Host ""
+    Write-Host "  [$bar] $percent% " -NoNewline -ForegroundColor Yellow
+    Write-Host "Loading: " -NoNewline -ForegroundColor Gray
+    Write-Host "$module" -ForegroundColor White
     
-    foreach ($module in $requiredGraphModules) {
-        $currentModule++
-        $percent = [math]::Floor(($currentModule / $totalModules) * 100)
-        $filled = [math]::Floor(($currentModule / $totalModules) * $barWidth)
-        $empty = $barWidth - $filled
-        $bar = "█" * $filled + "░" * $empty
-        
+    try {
+        Import-Module $module -Force -ErrorAction Stop
+        # Verify the module is actually loaded
         if (-not (Get-Module -Name $module)) {
-            Write-Host "  [$bar] $percent% " -NoNewline -ForegroundColor Yellow
-            Write-Host "Loading: " -NoNewline -ForegroundColor Gray
-            Write-Host "$module" -ForegroundColor White
-            Import-Module $module -ErrorAction SilentlyContinue
-        } else {
-            Write-Host "  [$bar] $percent% " -NoNewline -ForegroundColor Green
-            Write-Host "Loaded:  " -NoNewline -ForegroundColor Gray
-            Write-Host "$module" -ForegroundColor Green
+            throw "Module $module did not load properly"
         }
+    } catch {
+        Write-Host "  ❌ Failed to load $module : $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "  Run: Install-Module $module -Scope CurrentUser -Force" -ForegroundColor Yellow
+        exit 1
     }
-    
-    Write-Host ""
-    Write-Host "  ✓ All modules ready!" -ForegroundColor Green
-    Write-Host ""
 }
+
+Write-Host ""
+Write-Host "  ✓ All modules ready!" -ForegroundColor Green
+Write-Host ""
 
 # ========================= Authenticate to Microsoft Graph =========================
 [Console]::CursorVisible = $false
@@ -3686,7 +3686,7 @@ try {
     # Clear any expired cache entries before starting
     Clear-ExpiredCache
     
-    $scopes = @('RoleManagement.ReadWrite.Directory', 'Directory.Read.All', 'User.Read')
+    $scopes = @('RoleManagement.ReadWrite.Directory', 'Directory.Read.All')
     $connected = Connect-MgGraphWithBrowser -Scopes $scopes
     
     if (-not $connected) {
@@ -3696,8 +3696,8 @@ try {
     
     Write-Host "✅ Successfully connected to Microsoft Graph" -ForegroundColor Green
     
-    $currentUser = Get-MgUser -UserId (Get-MgContext).Account -ErrorAction Stop
-    $currentUserId = $currentUser.Id
+    $currentUser = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/me" -ErrorAction Stop
+    $currentUserId = $currentUser.id
     Write-Host "✅ Current User ID: $currentUserId" -ForegroundColor Green
     
     # OPTIMIZATION: Batch load all role definitions once (eliminates N individual API calls)
