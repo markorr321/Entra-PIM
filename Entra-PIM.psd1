@@ -1,0 +1,76 @@
+@{
+    # Module manifest for Entra-PIM
+    # Generated for PSResourceGet / GitHub Releases distribution
+
+    # Script module or binary module file associated with this manifest
+    RootModule = 'Entra-PIM.psm1'
+
+    # Version number of this module (SemVer format for PSResourceGet)
+    ModuleVersion = '1.0.0'
+
+    # ID used to uniquely identify this module
+    GUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
+
+    # Author of this module
+    Author = 'Your Name'
+
+    # Company or vendor of this module
+    CompanyName = 'Your Company'
+
+    # Copyright statement for this module
+    Copyright = '(c) 2024. All rights reserved.'
+
+    # Description of the functionality provided by this module
+    Description = 'PowerShell module for managing Microsoft Entra PIM (Privileged Identity Management) role activations and deactivations with browser-based authentication.'
+
+    # Minimum version of the PowerShell engine required by this module
+    PowerShellVersion = '7.0'
+
+    # Modules that must be imported into the global environment prior to importing this module
+    # RequiredModules = @()  # Dependencies checked at runtime instead
+
+    # Functions to export from this module - just one simple command
+    FunctionsToExport = @('Start-EntraPIM')
+
+    # Cmdlets to export from this module
+    CmdletsToExport = @()
+
+    # Variables to export from this module
+    VariablesToExport = @()
+
+    # Aliases to export from this module
+    AliasesToExport = @()
+
+    # Private data to pass to the module specified in RootModule
+    PrivateData = @{
+        PSData = @{
+            # Tags applied to this module for discoverability in online galleries
+            Tags = @('Entra', 'PIM', 'Azure', 'Identity', 'Governance', 'MicrosoftGraph', 'Privileged', 'RoleManagement')
+
+            # A URL to the license for this module
+            LicenseUri = 'https://github.com/YOUR_USERNAME/Entra-PIM/blob/main/LICENSE'
+
+            # A URL to the main website for this project
+            ProjectUri = 'https://github.com/YOUR_USERNAME/Entra-PIM'
+
+            # A URL to an icon representing this module
+            IconUri = 'https://raw.githubusercontent.com/YOUR_USERNAME/Entra-PIM/main/icon.png'
+
+            # ReleaseNotes of this module
+            ReleaseNotes = @'
+## 1.0.0
+- Initial release
+- Browser-based authentication with PKCE
+- Role activation and deactivation workflows
+- Interactive TUI for role selection
+- Caching for optimized API calls
+'@
+
+            # Prerelease string of this module
+            Prerelease = ''
+
+            # Flag to indicate whether the module requires explicit user acceptance for install/update/save
+            RequireLicenseAcceptance = $false
+        }
+    }
+}
