@@ -1,19 +1,19 @@
 # Entra-PIM
 
-PowerShell module for managing Microsoft Entra PIM role activations and deactivations.
+PowerShell module for managing Microsoft Entra PIM (Privileged Identity Management) role activations and deactivations with browser-based authentication.
 
 ## Installation
 
-### One-time setup (register the GitHub repository)
+### Using PowerShellGet
 
 ```powershell
-Register-PSResourceRepository -Name 'EntraPIM-GH' -Uri 'https://api.github.com/repos/YOUR_USERNAME/Entra-PIM/releases' -Trusted
+Install-Module -Name Entra-PIM -Repository PSGallery
 ```
 
-### Install the module
+### Using PSResourceGet
 
 ```powershell
-Install-PSResource -Name Entra-PIM -Repository EntraPIM-GH
+Install-PSResource -Name Entra-PIM -Repository PSGallery
 ```
 
 ## Usage
@@ -30,11 +30,21 @@ That's it! The tool will:
 ## Requirements
 
 - PowerShell 7.0+
-- Microsoft.Graph.Authentication module
-- Microsoft.Graph.Identity.Governance module
 
 ## Updating
 
+### Using PowerShellGet
+
 ```powershell
-Update-PSResource -Name Entra-PIM -Repository EntraPIM-GH
+Update-Module -Name Entra-PIM
 ```
+
+### Using PSResourceGet
+
+```powershell
+Update-PSResource -Name Entra-PIM
+```
+
+## Tags
+
+Entra, PIM, Azure, Identity, Governance, MicrosoftGraph, Privileged, RoleManagement
