@@ -6,7 +6,7 @@
     RootModule = 'Entra-PIM.psm1'
 
     # Version number of this module (SemVer format for PSResourceGet)
-    ModuleVersion = '1.4.0'
+    ModuleVersion = '1.5.0'
 
     # ID used to uniquely identify this module
     GUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
@@ -58,6 +58,10 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+## 1.5.0
+- Added auto-installation of required modules (Az.Accounts, Microsoft.Graph)
+- Script now automatically installs missing dependencies on first run
+
 ## 1.4.0
 - Switched to WAM (Windows Account Manager) authentication for native SSO
 - Removed app registration dependency - uses Microsoft public client ID
