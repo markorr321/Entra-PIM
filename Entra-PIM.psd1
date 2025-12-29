@@ -58,6 +58,15 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+## 1.4.0
+- Switched to WAM (Windows Account Manager) authentication for native SSO
+- Removed app registration dependency - uses Microsoft public client ID
+- Renamed script to Entra-PIM.ps1
+- Code cleanup and optimizations
+
+## 1.3.2
+- Bug fixes
+
 ## 1.3.1
 - Fixed project URLs in manifest
 
