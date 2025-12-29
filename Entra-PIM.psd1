@@ -6,7 +6,7 @@
     RootModule = 'Entra-PIM.psm1'
 
     # Version number of this module (SemVer format for PSResourceGet)
-    ModuleVersion = '1.3.2'
+    ModuleVersion = '1.4.0'
 
     # ID used to uniquely identify this module
     GUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
