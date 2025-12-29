@@ -333,7 +333,7 @@ function Get-EligibleRolesOptimized {
         # But role definition lookups are instant from cache
         $eligibilitySchedules = Get-MgRoleManagementDirectoryRoleEligibilityScheduleInstance -Filter "PrincipalId eq '$CurrentUserId'" -All
         $activatedAssignments = Get-MgRoleManagementDirectoryRoleAssignmentScheduleInstance -Filter "PrincipalId eq '$CurrentUserId' and AssignmentType eq 'Activated'" -All -ErrorAction SilentlyContinue
-        $allRequests = Get-MgRoleManagementDirectoryRoleAssignmentScheduleRequest -Filter "PrincipalId eq '$CurrentUserId'" -All -ErrorAction SilentlyContinue
+        $allRequests = Get-MgRoleManagementDirectoryRoleAssignmentScheduleRequest -Filter "PrincipalId eq '$CurrentUserId'" -Top 100 -ErrorAction SilentlyContinue
         
         # Process eligibility schedules with cached role definitions (instant lookup)
         foreach ($schedule in $eligibilitySchedules) {
@@ -360,12 +360,17 @@ function Get-EligibleRolesOptimized {
             } | Select-Object -ExpandProperty RoleDefinitionId -Unique
         }
         
-        # Process pending requests - check all statuses that indicate pending
-        if ($allRequests) {
-            $pendingRoleIds = $allRequests | Where-Object { 
-                ($_.Action -eq 'SelfActivate' -or $_.Action -eq 'selfActivate') -and
-                ($_.Status -in @('PendingApproval', 'Provisioning', 'PendingScheduleCreation', 'Approved', 'PendingProvisioning'))
-            } | Select-Object -ExpandProperty RoleDefinitionId -Unique
+        # Process pending requests - use REST API to get PendingApproval requests
+        # The PowerShell cmdlet doesn't reliably return PendingApproval status
+        try {
+            $pendingResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignmentScheduleRequests?`$filter=status eq 'PendingApproval'" -ErrorAction SilentlyContinue
+            if ($pendingResponse -and $pendingResponse.value) {
+                $pendingRoleIds = @($pendingResponse.value | Where-Object { $_.principalId -eq $CurrentUserId } | Select-Object -ExpandProperty roleDefinitionId -Unique)
+            } else {
+                $pendingRoleIds = @()
+            }
+        } catch {
+            $pendingRoleIds = @()
         }
     } catch {
         Write-Host "Error retrieving roles: $($_.Exception.Message)" -ForegroundColor Red
@@ -1515,17 +1520,23 @@ function Show-PIMGlobalHeader {
             
             # Handle Enter
             if ($key.Key -eq 'Enter') {
-                # Move to next line after input and clear control bar
-                Write-Host ""
-                # Clear the control bar when input is complete
+                # Store current position (after user input on prompt line)
+                $inputEndTop = $promptTop + 1
+                
+                # Clear the control bar and any leftover content below it
                 if ($script:LastControlBarLine -ge 0) {
                     try {
-                        [Console]::SetCursorPosition(0, $script:LastControlBarLine)
-                        Write-Host (" " * [Console]::WindowWidth) -NoNewline
-                        [Console]::SetCursorPosition(0, $script:LastControlBarLine)
+                        # Clear control bar line and several lines below to remove stale content
+                        for ($clearLine = $script:LastControlBarLine; $clearLine -lt [Math]::Min($script:LastControlBarLine + 5, [Console]::BufferHeight); $clearLine++) {
+                            [Console]::SetCursorPosition(0, $clearLine)
+                            Write-Host (" " * [Console]::WindowWidth) -NoNewline
+                        }
                         $script:LastControlBarLine = -1
                     } catch { }
                 }
+                
+                # Move cursor to line after the prompt for subsequent output
+                [Console]::SetCursorPosition(0, $inputEndTop)
                 break
             }
             
@@ -1895,6 +1906,10 @@ function Show-PIMGlobalHeader {
                         } else {
                             Write-Host "⚠️ Skipped $roleName - role is already active" -ForegroundColor Yellow
                         }
+                        $done = $true
+                    } elseif ($errorMsg -like "*PendingRoleAssignmentRequest*") {
+                        # Role has a pending activation request - skip it
+                        Write-Host "⚠️ Skipped $roleName - activation already pending approval" -ForegroundColor Yellow
                         $done = $true
                     } elseif ($errorMsg -like "*error occurred while sending the request*") {
                         $retryCount++
@@ -2938,9 +2953,11 @@ function Show-PIMGlobalHeader {
                                 $selectedItems += $i
                             }
                         }
-                        # Clear the control bar line before returning
-                        [Console]::SetCursorPosition(0, $controlBarTop)
-                        Write-Host (" " * [Console]::WindowWidth) -NoNewline
+                        # Clear the control bar line and several lines below to remove stale content
+                        for ($clearLine = $controlBarTop; $clearLine -lt [Math]::Min($controlBarTop + 10, [Console]::BufferHeight); $clearLine++) {
+                            [Console]::SetCursorPosition(0, $clearLine)
+                            Write-Host (" " * [Console]::WindowWidth) -NoNewline
+                        }
                         [Console]::SetCursorPosition(0, $controlBarTop)
                         return $selectedItems
                     }
@@ -3182,48 +3199,34 @@ function Start-RoleDeactivationWorkflow {
             return
         }  
     # Check for roles that are too new to deactivate (5-minute rule)
+    # Use StartDateTime from assignment directly - more reliable than cached schedules
     $readyToDeactivate = @()
     $tooNewRoles = @()
-    
     
     foreach ($role in $ActiveRoles) {
         try {
             $assignment = $role.Assignment
-            $schedules = $cachedSchedules | Where-Object { 
-                $_.PrincipalId -eq $assignment.PrincipalId -and 
-                $_.RoleDefinitionId -eq $assignment.RoleDefinitionId 
+            $activationTime = $null
+            
+            # Use individual activation time from API (same approach as Start-RoleDeactivationWorkflowWithCheck)
+            if ($assignment.StartDateTime) {
+                $activationTime = [DateTime]::Parse($assignment.StartDateTime).ToLocalTime()
             }
             
-            if ($schedules) {
-                # Filter for activation requests only
-                $activationSchedules = $schedules | Where-Object { $_.Action -eq "selfActivate" }
-                if ($activationSchedules) {
-                    # Get the most recent activation request
-                    $latestSchedule = $activationSchedules | Sort-Object CreatedDateTime -Descending | Select-Object -First 1
-                    
-                    # Get activation time efficiently
-                    if ($latestSchedule.ScheduleInfo -and $latestSchedule.ScheduleInfo.StartDateTime) {
-                        $activationTime = [DateTime]::Parse($latestSchedule.ScheduleInfo.StartDateTime).ToLocalTime()
-                    } else {
-                        $activationTime = [DateTime]::Parse($latestSchedule.CreatedDateTime).ToLocalTime()
-                    }
-                    
-                    $timeSinceActivation = (Get-Date) - $activationTime
-                    if ($timeSinceActivation.TotalMinutes -lt 5) {
-                        $tooNewRoles += [PSCustomObject]@{
-                            RoleName = $role.RoleName
-                            ActivationTime = $activationTime
-                            Assignment = $role.Assignment
-                        }
-                    } else {
-                        $readyToDeactivate += $role
+            if ($activationTime) {
+                $timeSinceActivation = (Get-Date) - $activationTime
+                
+                if ($timeSinceActivation.TotalMinutes -lt 5) {
+                    $tooNewRoles += [PSCustomObject]@{
+                        RoleName = $role.RoleName
+                        ActivationTime = $activationTime
+                        Assignment = $role.Assignment
                     }
                 } else {
-                    # No activation schedules found, assume it's ready
                     $readyToDeactivate += $role
                 }
             } else {
-                # If we can't get activation time, assume it's ready (old activation)
+                # No activation time available, assume it's ready (old activation)
                 $readyToDeactivate += $role
             }
         } catch {
@@ -3248,7 +3251,12 @@ function Start-RoleDeactivationWorkflow {
         }
         Write-Host ""
         
-        Show-DeactivationCountdown -TooNewRoles $tooNewRoles
+        $countdownResult = Show-DeactivationCountdown -TooNewRoles $tooNewRoles
+        
+        # If countdown completed successfully, continue to deactivation workflow
+        if ($countdownResult -eq $true) {
+            Start-RoleDeactivationWorkflow -ActiveRoles $ActiveRoles -CurrentUserId $CurrentUserId
+        }
         return
     }
     
@@ -3388,6 +3396,8 @@ function Start-RoleDeactivationWorkflow {
     }
     
     # Use countdown menu if we have expiration data
+    # Clear screen before showing menu to remove any stale content
+    Clear-Host
     if ($roleExpirationData.Count -gt 0) {
         $selectedIndices = Show-CheckboxMenu -Items $readyToDeactivate -Title "🔄 Select Active Roles to Deactivate" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -DisplayProperty "RoleName"
     } else {
