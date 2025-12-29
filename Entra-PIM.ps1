@@ -3728,6 +3728,42 @@ Write-Host ""
 
 # ========================= Load Required Modules =========================
 
+# Define all required modules
+$requiredModules = @(
+    "Az.Accounts",
+    "Microsoft.Graph.Authentication",
+    "Microsoft.Graph.Identity.DirectoryManagement",
+    "Microsoft.Graph.Identity.Governance"
+)
+
+# Check and install missing modules
+$missingModules = @()
+foreach ($modName in $requiredModules) {
+    $installed = Get-Module -Name $modName -ListAvailable | Select-Object -First 1
+    if (-not $installed) {
+        $missingModules += $modName
+    }
+}
+
+if ($missingModules.Count -gt 0) {
+    Write-Host "Installing missing modules..." -ForegroundColor Yellow
+    Write-Host ""
+    
+    foreach ($modName in $missingModules) {
+        Write-Host "  Installing $modName..." -NoNewline -ForegroundColor Cyan
+        try {
+            Install-Module -Name $modName -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop
+            Write-Host " ✓" -ForegroundColor Green
+        } catch {
+            Write-Host " ✗" -ForegroundColor Red
+            Write-Host "  Failed to install ${modName}: $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "  Please run manually: Install-Module $modName -Scope CurrentUser -Force" -ForegroundColor Yellow
+            exit 1
+        }
+    }
+    Write-Host ""
+}
+
 # Pre-load Az.Accounts FIRST and compile WAM helper BEFORE Graph modules load their own MSAL
 $wamInitialized = Initialize-WAMAssemblies
 if ($wamInitialized) {
