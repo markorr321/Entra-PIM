@@ -132,9 +132,14 @@ public class PIMWAMBroker
     
     public static string GetAccessToken(string clientId, string redirectUri, string[] scopes)
     {
+        return GetAccessTokenWithClaims(clientId, redirectUri, scopes, null);
+    }
+    
+    public static string GetAccessTokenWithClaims(string clientId, string redirectUri, string[] scopes, string claims)
+    {
         try
         {
-            var task = Task.Run(async () => await GetAccessTokenAsync(clientId, redirectUri, scopes));
+            var task = Task.Run(async () => await GetAccessTokenAsync(clientId, redirectUri, scopes, claims));
             if (task.Wait(TimeSpan.FromSeconds(120)))
             {
                 return task.Result;
@@ -148,7 +153,7 @@ public class PIMWAMBroker
         }
     }
     
-    private static async Task<string> GetAccessTokenAsync(string clientId, string redirectUri, string[] scopes)
+    private static async Task<string> GetAccessTokenAsync(string clientId, string redirectUri, string[] scopes, string claims)
     {
         var brokerOptions = new BrokerOptions(BrokerOptions.OperatingSystems.Windows)
         {
@@ -163,9 +168,16 @@ public class PIMWAMBroker
         
         using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(180)))
         {
-            // WAM broker handles auth natively when WithBroker is set
-            var result = await publicClientApp.AcquireTokenInteractive(scopes)
-                .WithPrompt(Prompt.SelectAccount)
+            var builder = publicClientApp.AcquireTokenInteractive(scopes)
+                .WithPrompt(Prompt.SelectAccount);
+            
+            // Add claims challenge if provided (for Conditional Access step-up)
+            if (!string.IsNullOrEmpty(claims))
+            {
+                builder = builder.WithClaims(claims);
+            }
+            
+            var result = await builder
                 .ExecuteAsync(cts.Token)
                 .ConfigureAwait(false);
             
@@ -214,6 +226,34 @@ function Get-WAMAccessToken {
     }
     
     $accessToken = [PIMWAMBroker]::GetAccessToken($clientId, $redirectUri, $scopeArray)
+    return $accessToken
+}
+
+function Get-WAMAccessTokenWithClaims {
+    <#
+    .SYNOPSIS
+        Gets an access token with claims challenge for Conditional Access step-up authentication.
+    #>
+    param(
+        [string[]]$Scopes,
+        [string]$Claims
+    )
+    
+    # Ensure WAM helper is compiled
+    if (-not $script:WAMHelperCompiled) {
+        $null = Initialize-WAMHelper
+    }
+    
+    # Use Microsoft's well-known PowerShell public client ID (no app registration required)
+    $clientId = "14d82eec-204b-4c2f-b7e8-296a70dab67e"
+    $redirectUri = "http://localhost"
+    
+    # Build scopes string for Graph
+    $scopeArray = $Scopes | ForEach-Object { 
+        if ($_ -notlike "https://*") { "https://graph.microsoft.com/$_" } else { $_ }
+    }
+    
+    $accessToken = [PIMWAMBroker]::GetAccessTokenWithClaims($clientId, $redirectUri, $scopeArray, $Claims)
     return $accessToken
 }
 
@@ -1990,6 +2030,45 @@ function Show-PIMGlobalHeader {
                     } elseif ($errorMsg -like "*PendingRoleAssignmentRequest*") {
                         # Role has a pending activation request - skip it
                         Write-Host "⚠️ Skipped $roleName - activation already pending approval" -ForegroundColor Yellow
+                        $done = $true
+                    } elseif ($errorMsg -like "*RoleAssignmentRequestAcrsValidationFailed*" -or $errorMsg -like "*&claims=*") {
+                        # Conditional Access requires step-up authentication (ACRS claim)
+                        Write-Host "🔐 $roleName requires additional authentication (Conditional Access)..." -ForegroundColor Yellow
+                        
+                        # Extract claims from error message
+                        $claimsMatch = [regex]::Match($errorMsg, '&claims=([^&\s\]]+)')
+                        if ($claimsMatch.Success) {
+                            $encodedClaims = $claimsMatch.Groups[1].Value
+                            $decodedClaims = [System.Web.HttpUtility]::UrlDecode($encodedClaims)
+                            
+                            try {
+                                # Get new token with claims challenge
+                                $scopes = @('RoleManagement.ReadWrite.Directory', 'Directory.Read.All')
+                                $newToken = Get-WAMAccessTokenWithClaims -Scopes $scopes -Claims $decodedClaims
+                                
+                                if ($newToken) {
+                                    # Reconnect to Graph with new token
+                                    $secureToken = ConvertTo-SecureString $newToken -AsPlainText -Force
+                                    Connect-MgGraph -AccessToken $secureToken -NoWelcome -ErrorAction Stop
+                                    
+                                    # Retry the activation request
+                                    $result = New-MgRoleManagementDirectoryRoleAssignmentScheduleRequest -BodyParameter $activationRequest -ErrorAction Stop
+                                    if ($result) {
+                                        Write-Host "✅ Role activation submitted for: $roleName" -ForegroundColor Green
+                                        $successCount++
+                                    }
+                                } else {
+                                    Write-Host "❌ Failed to activate: $roleName - Step-up authentication failed" -ForegroundColor Red
+                                    $failCount++
+                                }
+                            } catch {
+                                Write-Host "❌ Failed to activate: $roleName - $($_.Exception.Message)" -ForegroundColor Red
+                                $failCount++
+                            }
+                        } else {
+                            Write-Host "❌ Failed to activate: $roleName - Could not extract claims from error" -ForegroundColor Red
+                            $failCount++
+                        }
                         $done = $true
                     } elseif ($errorMsg -like "*error occurred while sending the request*") {
                         $retryCount++
