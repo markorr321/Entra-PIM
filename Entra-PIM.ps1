@@ -1,180 +1,260 @@
-# ========================= Automatic Browser-Based Authentication =========================
-function Connect-MgGraphWithBrowser {
+# ========================= Authentication =========================
+# Global variable to store assembly paths
+$script:WAMAssemblyPaths = @{}
+
+function Initialize-WAMAssemblies {
+    <#
+    .SYNOPSIS
+        Loads the required MSAL assemblies from Az.Accounts for WAM authentication.
+    #>
+    
+    # Check if Az.Accounts is loaded, if not load it
+    $LoadedAzAccountsModule = Get-Module -Name Az.Accounts
+    if ($null -eq $LoadedAzAccountsModule) {
+        $AzAccountsModule = Get-Module -Name Az.Accounts -ListAvailable | Select-Object -First 1
+        if ($null -eq $AzAccountsModule) {
+            Write-Verbose "Az.Accounts module not found"
+            return $false
+        }
+        Import-Module Az.Accounts -ErrorAction SilentlyContinue -Verbose:$false
+    }
+    
+    # Find the Azure.Common assembly location
+    $LoadedAssemblies = [System.AppDomain]::CurrentDomain.GetAssemblies() | Select-Object -ExpandProperty Location -ErrorAction SilentlyContinue
+    $AzureCommon = $LoadedAssemblies | Where-Object { $_ -match "\\Modules\\Az.Accounts\\" -and $_ -match "Microsoft.Azure.Common" }
+    
+    if (-not $AzureCommon) {
+        Write-Verbose "Could not find Microsoft.Azure.Common assembly"
+        return $false
+    }
+    
+    $AzureCommonLocation = Split-Path -Parent $AzureCommon
+    
+    # Find and load required MSAL assemblies for WAM
+    $requiredAssemblies = @(
+        'Microsoft.IdentityModel.Abstractions.dll',
+        'Microsoft.Identity.Client.dll',
+        'Microsoft.Identity.Client.Broker.dll',
+        'Microsoft.Identity.Client.NativeInterop.dll',
+        'Microsoft.Identity.Client.Extensions.Msal.dll',
+        'System.Security.Cryptography.ProtectedData.dll'
+    )
+    
+    $loadedAssembliesCheck = [System.AppDomain]::CurrentDomain.GetAssemblies()
+    
+    foreach ($assemblyFile in $requiredAssemblies) {
+        $assemblyName = $assemblyFile.Replace('.dll', '')
+        $alreadyLoaded = $loadedAssembliesCheck | Where-Object { $_.GetName().Name -eq $assemblyName }
+        
+        if (-not $alreadyLoaded) {
+            $found = Get-ChildItem -Path $AzureCommonLocation -Filter $assemblyFile -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) {
+                try {
+                    [void][System.Reflection.Assembly]::LoadFrom($found.FullName)
+                    $script:WAMAssemblyPaths[$assemblyName] = $found.FullName
+                } catch { }
+            }
+        } else {
+            $script:WAMAssemblyPaths[$assemblyName] = $alreadyLoaded.Location
+        }
+    }
+    
+    # Load System.Diagnostics.TraceSource.dll from .NET Core (required for WAM)
+    $RuntimeFrameworkMajorVersion = [System.Runtime.InteropServices.RuntimeInformation]::FrameworkDescription.Split()[-1].Split(".")[0]
+    $dotNetDirectory = Get-ChildItem -Path "C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref" -Filter "$RuntimeFrameworkMajorVersion.*" -Directory -ErrorAction SilentlyContinue | 
+        Sort-Object -Property Name -Descending | Select-Object -First 1
+    if ($dotNetDirectory) {
+        $sdts = Get-ChildItem -Path $dotNetDirectory.FullName -Filter "System.Diagnostics.TraceSource.dll" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+        if ($sdts) {
+            try {
+                [void][System.Reflection.Assembly]::LoadFrom($sdts.FullName)
+                $script:WAMAssemblyPaths['System.Diagnostics.TraceSource'] = $sdts.FullName
+            } catch { }
+        }
+    }
+    
+    return $true
+}
+
+# Global to track if WAM helper is compiled
+$script:WAMHelperCompiled = $false
+
+function Initialize-WAMHelper {
+    <#
+    .SYNOPSIS
+        Pre-compiles the WAM helper C# code before Graph modules load conflicting MSAL versions.
+    #>
+    
+    if ($script:WAMHelperCompiled) { return $true }
+    
+    # Get referenced assemblies for Add-Type (must include all MSAL and .NET Core assemblies)
+    $referencedAssemblies = @(
+        $script:WAMAssemblyPaths['Microsoft.IdentityModel.Abstractions'],
+        $script:WAMAssemblyPaths['Microsoft.Identity.Client'],
+        $script:WAMAssemblyPaths['Microsoft.Identity.Client.Broker'],
+        $script:WAMAssemblyPaths['Microsoft.Identity.Client.NativeInterop'],
+        $script:WAMAssemblyPaths['Microsoft.Identity.Client.Extensions.Msal'],
+        $script:WAMAssemblyPaths['System.Security.Cryptography.ProtectedData'],
+        $script:WAMAssemblyPaths['System.Diagnostics.TraceSource']
+    ) | Where-Object { $_ }
+    
+    if ($referencedAssemblies.Count -lt 4) {
+        throw "Missing required MSAL assemblies for WAM"
+    }
+    
+    # Add standard assemblies
+    $referencedAssemblies += @("netstandard", "System.Linq", "System.Threading.Tasks")
+    
+    # C# code for WAM authentication
+    $code = @"
+using System;
+using System.Linq;
+using System.Runtime.InteropServices;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.Identity.Client;
+using Microsoft.Identity.Client.Broker;
+
+public class PIMWAMBroker
+{
+    [DllImport("user32.dll", ExactSpelling = true)]
+    public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+    [DllImport("kernel32.dll")]
+    public static extern IntPtr GetConsoleWindow();
+    
+    public static IntPtr GetConsoleOrTerminalWindow()
+    {
+        IntPtr consoleHandle = GetConsoleWindow();
+        if (consoleHandle == IntPtr.Zero) return IntPtr.Zero;
+        IntPtr handle = GetAncestor(consoleHandle, 3);
+        return (handle != IntPtr.Zero) ? handle : consoleHandle;
+    }
+    
+    public static string GetAccessToken(string clientId, string redirectUri, string[] scopes)
+    {
+        try
+        {
+            var task = Task.Run(async () => await GetAccessTokenAsync(clientId, redirectUri, scopes));
+            if (task.Wait(TimeSpan.FromSeconds(120)))
+            {
+                return task.Result;
+            }
+            throw new TimeoutException("Authentication timed out");
+        }
+        catch (AggregateException ae)
+        {
+            if (ae.InnerException != null) throw ae.InnerException;
+            throw;
+        }
+    }
+    
+    private static async Task<string> GetAccessTokenAsync(string clientId, string redirectUri, string[] scopes)
+    {
+        var brokerOptions = new BrokerOptions(BrokerOptions.OperatingSystems.Windows)
+        {
+            Title = "Entra PIM - Sign In"
+        };
+        
+        IPublicClientApplication publicClientApp = PublicClientApplicationBuilder.Create(clientId)
+            .WithBroker(brokerOptions)
+            .WithParentActivityOrWindow(GetConsoleOrTerminalWindow)
+            .WithRedirectUri(redirectUri)
+            .Build();
+        
+        using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(180)))
+        {
+            // WAM broker handles auth natively when WithBroker is set
+            var result = await publicClientApp.AcquireTokenInteractive(scopes)
+                .WithPrompt(Prompt.SelectAccount)
+                .ExecuteAsync(cts.Token)
+                .ConfigureAwait(false);
+            
+            return result.AccessToken;
+        }
+    }
+}
+"@
+    
+    # Check if type already exists
+    try {
+        $null = [PIMWAMBroker]
+        $script:WAMHelperCompiled = $true
+        return $true
+    } catch {
+        # Type doesn't exist, compile it
+    }
+    
+    Add-Type -ReferencedAssemblies $referencedAssemblies -TypeDefinition $code -Language CSharp -ErrorAction Stop -IgnoreWarnings
+    
+    $script:WAMHelperCompiled = $true
+    return $true
+}
+
+function Get-WAMAccessToken {
+    <#
+    .SYNOPSIS
+        Gets an access token using Windows Web Account Manager (WAM) via custom MSAL.
+    #>
+    param(
+        [string[]]$Scopes
+    )
+    
+    # Ensure WAM helper is compiled
+    if (-not $script:WAMHelperCompiled) {
+        $null = Initialize-WAMHelper
+    }
+    
+    # Use Microsoft's well-known PowerShell public client ID (no app registration required)
+    $clientId = "14d82eec-204b-4c2f-b7e8-296a70dab67e"
+    $redirectUri = "http://localhost"
+    
+    # Build scopes string for Graph
+    $scopeArray = $Scopes | ForEach-Object { 
+        if ($_ -notlike "https://*") { "https://graph.microsoft.com/$_" } else { $_ }
+    }
+    
+    $accessToken = [PIMWAMBroker]::GetAccessToken($clientId, $redirectUri, $scopeArray)
+    return $accessToken
+}
+
+# ========================= WAM Authentication =========================
+function Connect-MgGraphWithWAM {
     param(
         [string[]]$Scopes
     )
     
     try {
-        # Custom app registration client ID
-        $clientId = "88cd20f0-f0ae-4161-8a59-192684904fef"
-        $tenantId = "51eb883f-451f-4194-b108-4df354b35bf4"
-        $redirectUri = "http://127.0.0.1:8400/"
+        # Clear any existing Graph context first
+        try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch { }
         
-        # Build authorization URL with PKCE
-        $scopeString = ($Scopes -join " ")
-        $state = [guid]::NewGuid().ToString()
+        Write-Host "Authenticating..." -ForegroundColor Cyan
         
-        # Generate PKCE code verifier and challenge
-        $codeVerifier = -join ((65..90) + (97..122) + (48..57) + 45, 46, 95, 126 | Get-Random -Count 64 | ForEach-Object { [char]$_ })
-        $sha256 = [System.Security.Cryptography.SHA256]::Create()
-        $codeVerifierBytes = [System.Text.Encoding]::ASCII.GetBytes($codeVerifier)
-        $codeVerifierHash = $sha256.ComputeHash($codeVerifierBytes)
-        $codeChallenge = [Convert]::ToBase64String($codeVerifierHash) -replace '\+', '-' -replace '/', '_' -replace '=', ''
-        
-        # Add ACRS claims for step-up authentication
-        $claimsJson = '{"access_token":{"acrs":{"essential":true,"value":"c1"}}}'
-        $claimsEncoded = [uri]::EscapeDataString($claimsJson)
-        
-        $authUrl = "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/authorize?client_id=$clientId&response_type=code&redirect_uri=$([uri]::EscapeDataString($redirectUri))&response_mode=query&scope=$([uri]::EscapeDataString($scopeString))&state=$state&prompt=login&code_challenge=$codeChallenge&code_challenge_method=S256&claims=$claimsEncoded"
-        
-        # Start HTTP listener to capture auth code automatically
-        $listener = New-Object System.Net.HttpListener
-        $listener.Prefixes.Add($redirectUri)
-        $listener.Start()
-        
-        Write-Host "Opening browser for authentication..." -ForegroundColor Cyan
-        
-        # Open browser automatically
-        Start-Process $authUrl
-        
-        Write-Host "Waiting for authentication response..." -ForegroundColor Yellow
-        
-        # Wait for the callback
-        $code = $null
-        $returnedState = $null
-        $error_desc = $null
-        
-        while ($listener.IsListening) {
-            $context = $listener.GetContext()
-            $request = $context.Request
-            $response = $context.Response
-            
-            # Check if this request has a code or error
-            $queryParams = [System.Web.HttpUtility]::ParseQueryString($request.Url.Query)
-            $code = $queryParams["code"]
-            $returnedState = $queryParams["state"]
-            $error_desc = $queryParams["er
-            ror_description"]
-            
-            # Send response to browser
-            if ($code -or $error_desc) {
-                $responseString = "<html><head><meta charset='UTF-8'><style>body{font-family:Arial,sans-serif;display:flex;justify-content:center;align-items:center;height:100vh;margin:0;background:#1a1a2e;color:#fff;}</style></head><body><div style='text-align:center;'><h1 style='color:#4ade80;'>Authentication Successful!</h1><p>You can close this window and return to PowerShell.</p></div></body></html>"
+        # Use custom WAM helper with pre-loaded MSAL assemblies to avoid version conflicts
+        if ($script:WAMHelperCompiled) {
+            $accessToken = Get-WAMAccessToken -Scopes $Scopes
+            if ($accessToken) {
+                $secureToken = ConvertTo-SecureString $accessToken -AsPlainText -Force
+                Connect-MgGraph -AccessToken $secureToken -NoWelcome -ErrorAction Stop
             } else {
-                $responseString = "<html><body></body></html>"
+                throw "Failed to get access token from WAM"
             }
-            $buffer = [System.Text.Encoding]::UTF8.GetBytes($responseString)
-            $response.ContentLength64 = $buffer.Length
-            $response.OutputStream.Write($buffer, 0, $buffer.Length)
-            $response.OutputStream.Close()
-            
-            # If we got a code or error, stop listening
-            if ($code -or $error_desc) {
-                $listener.Stop()
-                break
-            }
+        } else {
+            throw "WAM helper not initialized - Az.Accounts module may be missing"
         }
         
-        if ($error_desc) {
-            Write-Host "Authentication error: $error_desc" -ForegroundColor Red
-            return $false
-        }
-        
-        if (-not $code) {
-            Write-Host "No authorization code received" -ForegroundColor Red
-            return $false
-        }
-        
-        if ($returnedState -ne $state) {
-            Write-Host "State mismatch - possible security issue" -ForegroundColor Red
-            return $false
-        }
-        
-        Write-Host "Authorization code received, exchanging for token..." -ForegroundColor Cyan
-        
-        # Exchange code for token with PKCE code verifier
-        $tokenUrl = "https://login.microsoftonline.com/$tenantId/oauth2/v2.0/token"
-        $body = @{
-            client_id     = $clientId
-            scope         = $scopeString
-            code          = $code
-            redirect_uri  = $redirectUri
-            grant_type    = "authorization_code"
-            code_verifier = $codeVerifier
-        }
-        
-        try {
-            $tokenResponse = Invoke-RestMethod -Uri $tokenUrl -Method Post -Body $body -ContentType "application/x-www-form-urlencoded"
-        } catch {
-            $errorDetails = $_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction SilentlyContinue
-            if ($errorDetails) {
-                Write-Host "Token exchange failed: $($errorDetails.error) - $($errorDetails.error_description)" -ForegroundColor Red
-            } else {
-                Write-Host "Token exchange failed: $($_.Exception.Message)" -ForegroundColor Red
-            }
-            return $false
-        }
-        
-        if ($tokenResponse.access_token) {
-            $secureToken = ConvertTo-SecureString $tokenResponse.access_token -AsPlainText -Force
-            Connect-MgGraph -AccessToken $secureToken -NoWelcome | Out-Null
+        $context = Get-MgContext
+        if ($context) {
+            Write-Host "  Connected" -ForegroundColor Green
             return $true
         } else {
-            Write-Host "Failed to obtain access token" -ForegroundColor Red
+            Write-Host "  Connection failed" -ForegroundColor Red
             return $false
         }
     } catch {
-        Write-Host "Authentication error: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "  $($_.Exception.Message)" -ForegroundColor Red
         return $false
     }
 }
-
-# PERFORMANCE OPTIMIZATION: Initialize global cache variables (simplified - no pending role caches)
-function Initialize-PIMCache {
-    # Initialize cache variables if they don't exist
-    if (-not $global:ActiveRoleCache) { $global:ActiveRoleCache = @() }
-    if (-not $global:ActiveRoleCacheTime) { $global:ActiveRoleCacheTime = $null }
-    if (-not $global:RoleDefinitionCache) { $global:RoleDefinitionCache = @{} }
-    if (-not $global:RoleDefinitionCacheTime) { $global:RoleDefinitionCacheTime = $null }
-}
-
-# Clear expired cache entries (simplified - no pending role caches)
-function Clear-ExpiredCache {
-    $currentTime = Get-Date
-    
-    # Clear active role cache if older than 60 seconds
-    if ($global:ActiveRoleCacheTime -and ($currentTime - $global:ActiveRoleCacheTime).TotalSeconds -gt 60) {
-        $global:ActiveRoleCache = @()
-        $global:ActiveRoleCacheTime = $null
-    }
-    
-    # Clear role definition cache if older than 5 minutes
-    if ($global:RoleDefinitionCacheTime -and ($currentTime - $global:RoleDefinitionCacheTime).TotalSeconds -gt 300) {
-        $global:RoleDefinitionCache = @{}
-        $global:RoleDefinitionCacheTime = $null
-    }
-}
-
-# Initialize cache on script start
-Initialize-PIMCache
-
-<#
-    Entra PIM Manager Script (Activation + Deactivation)
-    ----------------------------------------------------
-    - Detects and deactivates active roles (with justification)
-    - Falls back to activation if no roles are active
-    - Supports group-based and user-based eligibilities
-    - MFA-enforced MSAL login via browser
-    
-    FEATURES:
-    =========
-    
-    🚀 Performance Optimizations:
-       - API Response Caching: 60-80% faster repeated calls
-       - Parallel Processing: 50% faster role data processing (PowerShell 7+)
-       - Targeted API Filters: 40% less network traffic
-       - Optimized UI Updates: 30% less CPU usage
-       - Smart Module Loading: Faster startup with required modules only
-#>
 
 # ========================= Global Variables =========================
 
@@ -3647,6 +3727,17 @@ Write-Host "    with PowerShell" -ForegroundColor DarkGray
 Write-Host ""
 
 # ========================= Load Required Modules =========================
+
+# Pre-load Az.Accounts FIRST and compile WAM helper BEFORE Graph modules load their own MSAL
+$wamInitialized = Initialize-WAMAssemblies
+if ($wamInitialized) {
+    try {
+        $null = Initialize-WAMHelper
+    } catch {
+        $wamInitialized = $false
+    }
+}
+
 $requiredGraphModules = @(
     "Microsoft.Graph.Authentication",
     "Microsoft.Graph.Identity.DirectoryManagement",
@@ -3693,11 +3784,8 @@ Write-Host ""
 
 # Connect to Microsoft Graph using manual browser authentication
 try {
-    # Clear any expired cache entries before starting
-    Clear-ExpiredCache
-    
     $scopes = @('RoleManagement.ReadWrite.Directory', 'Directory.Read.All')
-    $connected = Connect-MgGraphWithBrowser -Scopes $scopes
+    $connected = Connect-MgGraphWithWAM -Scopes $scopes
     
     if (-not $connected) {
         Write-Host "❌ Failed to connect to Microsoft Graph" -ForegroundColor Red

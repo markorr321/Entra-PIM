@@ -19,7 +19,7 @@ function Start-EntraPIM {
     param()
     
     # Run the main script
-    $scriptPath = Join-Path $PSScriptRoot "PIM-Global-SelfActivate-Browser-Optimized.ps1"
+    $scriptPath = Join-Path $PSScriptRoot "Entra-PIM.ps1"
     & $scriptPath
 }
 
