@@ -6,7 +6,7 @@
     RootModule = 'Entra-PIM.psm1'
 
     # Version number of this module (SemVer format for PSResourceGet)
-    ModuleVersion = '1.6.0'
+    ModuleVersion = '1.6.1'
 
     # ID used to uniquely identify this module
     GUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
@@ -21,7 +21,7 @@
     Copyright = '(c) 2024. All rights reserved.'
 
     # Description of the functionality provided by this module
-    Description = 'PowerShell module for managing Microsoft Entra PIM (Privileged Identity Management) role activations and deactivations with browser-based authentication.'
+    Description = 'Simplify Microsoft Entra PIM role management with an interactive console experience. Features Windows native SSO via WAM (Web Account Manager), automatic step-up MFA handling, one-command activation/deactivation of eligible roles, and auto-installation of dependencies. Just run Start-EntraPIM - no app registration or complex configuration required.'
 
     # Minimum version of the PowerShell engine required by this module
     PowerShellVersion = '7.0'
