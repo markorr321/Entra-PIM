@@ -23,7 +23,7 @@ Start-EntraPIM
 ```
 
 That's it! The tool will:
-1. Open your browser for authentication
+1. Prompt for authentication via Web Account Manager (WAM)
 2. Show your eligible/active PIM roles
 3. Let you activate or deactivate roles interactively
 
