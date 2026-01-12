@@ -8,8 +8,11 @@ function Initialize-MSALAssemblies {
         Loads MSAL assemblies for browser-based authentication (no WAM).
     #>
 
+    # Get user home directory (cross-platform)
+    $userHome = if ($env:USERPROFILE) { $env:USERPROFILE } else { $HOME }
+
     # Try to find MSAL from nuget cache first
-    $nugetPath = Join-Path $env:USERPROFILE ".nuget\packages\microsoft.identity.client"
+    $nugetPath = Join-Path $userHome ".nuget/packages/microsoft.identity.client"
     $msalDll = $null
     $abstractionsDll = $null
 
@@ -17,20 +20,20 @@ function Initialize-MSALAssemblies {
         # Get latest version
         $latestVersion = Get-ChildItem $nugetPath -Directory | Sort-Object Name -Descending | Select-Object -First 1
         if ($latestVersion) {
-            $msalDll = Join-Path $latestVersion.FullName "lib\net6.0\Microsoft.Identity.Client.dll"
+            $msalDll = Join-Path $latestVersion.FullName "lib/net6.0/Microsoft.Identity.Client.dll"
             if (-not (Test-Path $msalDll)) {
-                $msalDll = Join-Path $latestVersion.FullName "lib\netstandard2.0\Microsoft.Identity.Client.dll"
+                $msalDll = Join-Path $latestVersion.FullName "lib/netstandard2.0/Microsoft.Identity.Client.dll"
             }
         }
 
         # Find abstractions
-        $abstractionsPath = Join-Path $env:USERPROFILE ".nuget\packages\microsoft.identitymodel.abstractions"
+        $abstractionsPath = Join-Path $userHome ".nuget/packages/microsoft.identitymodel.abstractions"
         if (Test-Path $abstractionsPath) {
             $latestAbstractions = Get-ChildItem $abstractionsPath -Directory | Sort-Object Name -Descending | Select-Object -First 1
             if ($latestAbstractions) {
-                $abstractionsDll = Join-Path $latestAbstractions.FullName "lib\net6.0\Microsoft.IdentityModel.Abstractions.dll"
+                $abstractionsDll = Join-Path $latestAbstractions.FullName "lib/net6.0/Microsoft.IdentityModel.Abstractions.dll"
                 if (-not (Test-Path $abstractionsDll)) {
-                    $abstractionsDll = Join-Path $latestAbstractions.FullName "lib\netstandard2.0\Microsoft.IdentityModel.Abstractions.dll"
+                    $abstractionsDll = Join-Path $latestAbstractions.FullName "lib/netstandard2.0/Microsoft.IdentityModel.Abstractions.dll"
                 }
             }
         }
@@ -49,7 +52,8 @@ function Initialize-MSALAssemblies {
         }
 
         $LoadedAssemblies = [System.AppDomain]::CurrentDomain.GetAssemblies() | Select-Object -ExpandProperty Location -ErrorAction SilentlyContinue
-        $AzureCommon = $LoadedAssemblies | Where-Object { $_ -match "\\Modules\\Az.Accounts\\" -and $_ -match "Microsoft.Azure.Common" }
+        # Cross-platform regex - match both forward and back slashes
+        $AzureCommon = $LoadedAssemblies | Where-Object { $_ -match "[/\\]Modules[/\\]Az.Accounts[/\\]" -and $_ -match "Microsoft.Azure.Common" }
 
         if ($AzureCommon) {
             $AzureCommonLocation = Split-Path -Parent $AzureCommon
@@ -516,7 +520,7 @@ function Show-HelpMenu {
     Write-Host ""
     Write-Host "SHORTCUTS" -ForegroundColor Yellow
     Write-Host "  ↑/↓ Navigate   SPACE Toggle   Ctrl+A Select All   ENTER Confirm"
-    Write-Host "  ESC Cancel     Ctrl+Q Exit    ? Help"
+    Write-Host "  ESC Cancel     Ctrl+Q Exit    Ctrl+H Help"
     Write-Host ""
     Write-Host "WORKFLOWS" -ForegroundColor Yellow
     Write-Host "  Activate Roles     - Request temporary elevated permissions"
@@ -653,7 +657,7 @@ function Show-DynamicExpirationMenu {
             $selectedCount = ($selected | Where-Object { $_ }).Count
             Write-Host "Roles Selected: $selectedCount" -ForegroundColor Green
             Write-Host ""
-            Write-Host "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | ? Help | Ctrl+Q Exit" -ForegroundColor Magenta
+            Write-Host "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | Ctrl+H Help | Ctrl+Q Exit" -ForegroundColor Magenta
             
             # Handle input with timeout for countdown updates
             $inputAvailable = $false
@@ -707,11 +711,11 @@ function Show-DynamicExpirationMenu {
                     }
                 }
                 
-                # Handle ? for help menu
-                if ($key.KeyChar -eq '?') {
+                # Handle Ctrl+H for help menu
+                if ($key.Modifiers -eq "Control" -and $key.Key -eq "H") {
                     Show-HelpMenu
                 }
-                
+
                 # Handle Ctrl+Q
                 if ($key.Modifiers -eq "Control" -and $key.Key -eq "Q") {
                     Invoke-PIMExit -Message "Exiting PIM role management..."
@@ -1110,91 +1114,23 @@ function Start-RoleDeactivationWorkflowWithCheck {
     } while ($true)
     
     if ($continueChoice -eq "Yes") {
-        # Smart routing: Check what workflows are available
-        Clear-Host
-        Show-PIMGlobalHeaderMinimal
-        Write-Host ""
-        Write-Host "🔄 Loading roles..." -ForegroundColor Cyan -NoNewline
-        $eligibleRoles = Get-EligibleRolesOptimized -CurrentUserId $CurrentUserId
-        # Get active roles using cached approach to avoid duplicate API calls
-        $scheduleInstances = Get-CachedScheduleInstances -CurrentUserId $CurrentUserId
-        $activeRoles = @()
-        foreach ($instance in $scheduleInstances) {
-            $roleDefinition = Get-CachedRoleDefinition -RoleId $instance.RoleDefinitionId
-            if ($roleDefinition) {
-                $activeRoles += [PSCustomObject]@{
-                    RoleName = $roleDefinition.DisplayName
-                    Assignment = $instance
-                }
-            }
-        }
-        
-        # Filter out roles that are too new (within 5 minutes) for deactivation
-        $readyForDeactivation = @()
-        if ($activeRoles.Count -gt 0) {
-            foreach ($role in $activeRoles) {
-                $assignment = $role.Assignment
-                
-                # Use StartDateTime from the schedule instance we already have
-                if ($assignment.StartDateTime) {
-                    $activationTime = [DateTime]::Parse($assignment.StartDateTime).ToLocalTime()
-                    $timeSinceActivation = (Get-Date) - $activationTime
-                    
-                    if ($timeSinceActivation.TotalMinutes -ge 5) {
-                        $readyForDeactivation += $role
-                    }
-                } else {
-                    $readyForDeactivation += $role
-                }
-            }
-        }
-        
-        # Smart routing logic
-        if ($eligibleRoles.Count -gt 0 -and $readyForDeactivation.Count -gt 0) {
-            # Both workflows available - show choice menu using proper checkbox menu
-            $menuItems = @("Activate Roles", "Deactivate Roles")
-            $selectedIndices = Show-CheckboxMenu -Items $menuItems -Title "🔄 Choose Action" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -SingleSelection
-            
-            if ($selectedIndices.Count -gt 0) {
-                $selectedIndex = $selectedIndices[0]
-                $selectedAction = $menuItems[$selectedIndex]
-                
-                if ($selectedAction -eq "Activate Roles") {
-                    Start-RoleActivationWorkflow -ValidRoles $eligibleRoles -CurrentUserId $CurrentUserId
-                } elseif ($selectedAction -eq "Deactivate Roles") {
-                    Start-RoleDeactivationWorkflowWithCheck -CurrentUserId $CurrentUserId
-                }
-            }
-        } elseif ($eligibleRoles.Count -gt 0) {
-            # Only activation available - go directly to activation
-            Start-RoleActivationWorkflow -ValidRoles $eligibleRoles -CurrentUserId $CurrentUserId
-        } elseif ($readyForDeactivation.Count -gt 0) {
-            # Only deactivation available - go directly to deactivation
-            Start-RoleDeactivationWorkflowWithCheck -CurrentUserId $CurrentUserId
-        } else {
-            # No workflows available
-            Write-Host "❌ No role management workflows currently available." -ForegroundColor Red
-            Write-Host ""
-            Write-Host "Check back later when roles are approved or activated." -ForegroundColor Gray
-        }
+        # Return to main workflow selector (Entra/Azure choice)
         return
     } else {
-        Write-Host "❌ No role management workflows available." -ForegroundColor Red
-                    Write-Host ""
-                    Write-Host "Check back later when roles are approved or activated." -ForegroundColor Gray
-                    Show-DynamicControlBar
-                    
-                    # Hide cursor and wait for Ctrl+Q to exit
-                    [Console]::CursorVisible = $false
-                    do {
-                        $key = [Console]::ReadKey($true)
-                        if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
-                            Invoke-PIMExit -Message "Exiting PIM role management..."
-                        }
-                    } while ($true)
-                    return
-        Write-Host "Script completed successfully." -ForegroundColor Green
-        return
+        Write-Host "No additional roles will be managed." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Please close the terminal." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
+
+        # Hide cursor and wait for Ctrl+Q to exit
+        [Console]::CursorVisible = $false
+        do {
+            $key = [Console]::ReadKey($true)
+            if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+                Invoke-PIMExit -Message "Exiting PIM role management..."
+            }
+        } while ($true)
     }
     
     # Use expiration data already collected during initial role retrieval - NO ADDITIONAL API CALLS
@@ -1430,107 +1366,23 @@ function Start-RoleDeactivationWorkflowWithCheck {
     } while ($true)
     
     if ($continueChoice -eq "Yes") {
-        # Smart routing: Check what workflows are available
-        Clear-Host
-        Show-PIMGlobalHeaderMinimal
-        Write-Host ""
-        Write-Host "🔄 Loading roles..." -ForegroundColor Cyan -NoNewline
-        $eligibleRoles = Get-EligibleRolesOptimized -CurrentUserId $CurrentUserId
-        # Get active roles using cached approach to avoid duplicate API calls
-        $scheduleInstances = Get-CachedScheduleInstances -CurrentUserId $CurrentUserId
-        $activeRoles = @()
-        foreach ($instance in $scheduleInstances) {
-            $roleDefinition = Get-CachedRoleDefinition -RoleId $instance.RoleDefinitionId
-            if ($roleDefinition) {
-                $activeRoles += [PSCustomObject]@{
-                    RoleName = $roleDefinition.DisplayName
-                    Assignment = $instance
-                }
-            }
-        }
-        
-        # Filter out roles that are too new (within 5 minutes) for deactivation
-        $readyForDeactivation = @()
-        if ($activeRoles.Count -gt 0) {
-            $cachedSchedules = Get-CachedSchedules -CurrentUserId $CurrentUserId
-            foreach ($role in $activeRoles) {
-                $assignment = $role.Assignment
-                # Use same logic as deactivation workflow - only check recent requests
-                $recentCutoff = (Get-Date).AddMinutes(-10)
-                $schedules = $cachedSchedules | Where-Object { 
-                    $_.PrincipalId -eq $assignment.PrincipalId -and 
-                    $_.RoleDefinitionId -eq $assignment.RoleDefinitionId -and
-                    [DateTime]::Parse($_.CreatedDateTime) -gt $recentCutoff
-                }
-                
-                if ($schedules) {
-                    $activationSchedules = $schedules | Where-Object { $_.Action -eq "selfActivate" }
-                    if ($activationSchedules) {
-                        $latestSchedule = $activationSchedules | Sort-Object CreatedDateTime -Descending | Select-Object -First 1
-                        $requestTime = [DateTime]::Parse($latestSchedule.CreatedDateTime).ToLocalTime()
-                        
-                        # Use the actual API timestamp - this is the real activation time
-                        $activationTime = $requestTime
-                        
-                        $timeSinceActivation = (Get-Date) - $activationTime
-                        if ($timeSinceActivation.TotalMinutes -ge 5) {
-                            $readyForDeactivation += $role
-                        }
-                    } else {
-                        $readyForDeactivation += $role
-                    }
-                } else {
-                    $readyForDeactivation += $role
-                }
-            }
-        }
-        
-        # Smart routing logic
-        if ($eligibleRoles.Count -gt 0 -and $readyForDeactivation.Count -gt 0) {
-            # Both workflows available - show choice menu using proper checkbox menu
-            $menuItems = @("Activate Roles", "Deactivate Roles")
-            $selectedIndices = Show-CheckboxMenu -Items $menuItems -Title "🔄 Choose Action" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -SingleSelection
-            
-            if ($selectedIndices.Count -gt 0) {
-                $selectedIndex = $selectedIndices[0]
-                $selectedAction = $menuItems[$selectedIndex]
-                
-                if ($selectedAction -eq "Activate Roles") {
-                    Start-RoleActivationWorkflow -ValidRoles $eligibleRoles -CurrentUserId $CurrentUserId
-                } elseif ($selectedAction -eq "Deactivate Roles") {
-                    Start-RoleDeactivationWorkflowWithCheck -CurrentUserId $CurrentUserId
-                }
-            }
-        } elseif ($eligibleRoles.Count -gt 0) {
-            # Only activation available - go directly to activation
-            Start-RoleActivationWorkflow -ValidRoles $eligibleRoles -CurrentUserId $CurrentUserId
-        } elseif ($readyForDeactivation.Count -gt 0) {
-            # Only deactivation available - go directly to deactivation
-            Start-RoleDeactivationWorkflowWithCheck -CurrentUserId $CurrentUserId
-        } else {
-            # No workflows available
-            Write-Host "❌ No role management workflows currently available." -ForegroundColor Red
-            Write-Host ""
-            Write-Host "Check back later when roles are approved or activated." -ForegroundColor Gray
-        }
+        # Return to main workflow selector (Entra/Azure choice)
         return
     } else {
-        Write-Host "❌ No role management workflows available." -ForegroundColor Red
-                    Write-Host ""
-                    Write-Host "Check back later when roles are approved or activated." -ForegroundColor Gray
-                    Show-DynamicControlBar
-                    
-                    # Hide cursor and wait for Ctrl+Q to exit
-                    [Console]::CursorVisible = $false
-                    do {
-                        $key = [Console]::ReadKey($true)
-                        if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
-                            Invoke-PIMExit -Message "Exiting PIM role management..."
-                        }
-                    } while ($true)
-                    return
-        Write-Host "Script completed successfully." -ForegroundColor Green
-        return
+        Write-Host "No additional roles will be managed." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Please close the terminal." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
+
+        # Hide cursor and wait for Ctrl+Q to exit
+        [Console]::CursorVisible = $false
+        do {
+            $key = [Console]::ReadKey($true)
+            if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+                Invoke-PIMExit -Message "Exiting PIM role management..."
+            }
+        } while ($true)
     }
 }
 
@@ -1548,9 +1400,9 @@ function Show-PIMGlobalHeader {
     # Control message constants
     $script:ControlMessages = @{
         'Exit' = "Ctrl+Q Exit"
-        'Navigation' = "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | ? Help | Ctrl+Q Exit"
-        'Input' = "? Help | Ctrl+Q Exit"
-        'Menu' = "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | ? Help | Ctrl+Q Exit"
+        'Navigation' = "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | Ctrl+H Help | Ctrl+Q Exit"
+        'Input' = "Ctrl+H Help | Ctrl+Q Exit"
+        'Menu' = "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | Ctrl+H Help | Ctrl+Q Exit"
         'Shortcuts' = "Ctrl+A Select All | Ctrl+D Deselect All | Ctrl+R Refresh"
     }
     
@@ -1581,13 +1433,13 @@ function Show-PIMGlobalHeader {
         param(
             [System.ConsoleKeyInfo]$Key
         )
-        
+
         # Handle Ctrl+Q globally
         if ($Key.Key -eq 'Q' -and $Key.Modifiers -eq 'Control') {
             Invoke-PIMExit
             return $true
         }
-        
+
         return $false
     }
     
@@ -1628,7 +1480,30 @@ function Show-PIMGlobalHeader {
             if (Test-GlobalShortcut -Key $key) {
                 return $null
             }
-            
+
+            # Handle Ctrl+H for help
+            if ($key.Key -eq 'H' -and $key.Modifiers -eq 'Control') {
+                Show-HelpMenu
+                # Redraw the prompt after help
+                Clear-Host
+                if ($script:CurrentWorkflow -eq 'Azure') {
+                    Show-AzurePIMHeader
+                } else {
+                    Show-PIMGlobalHeaderMinimal
+                }
+                Write-Host ""
+                Write-Host "${Prompt}: " -ForegroundColor Cyan -NoNewline
+                Write-Host $userInput -NoNewline -ForegroundColor White
+                $promptLeft = [Console]::CursorLeft
+                $promptTop = [Console]::CursorTop
+                Write-Host ""
+                Write-Host ""
+                Write-Host $ControlsText -ForegroundColor Magenta
+                $script:LastControlBarLine = [Console]::CursorTop - 1
+                [Console]::SetCursorPosition($promptLeft, $promptTop)
+                continue
+            }
+
             # Handle ESC for cancellation
             if ($key.Key -eq 'Escape') {
                 Write-Host ""
@@ -2009,7 +1884,12 @@ function Show-PIMGlobalHeader {
                 try {
                     $result = New-MgRoleManagementDirectoryRoleAssignmentScheduleRequest -BodyParameter $activationRequest -ErrorAction Stop
                     if ($result) {
-                        Write-Host "✅ Role activation submitted for: $roleName" -ForegroundColor Green
+                        # Check the status - PendingApproval means it needs approval, Provisioned/Granted means success
+                        if ($result.Status -eq "PendingApproval") {
+                            Write-Host "⏳ Role activation submitted for: $roleName (pending approval)" -ForegroundColor Yellow
+                        } else {
+                            Write-Host "✅ Role activation submitted for: $roleName" -ForegroundColor Green
+                        }
                         $successCount++
                     }
                     $done = $true
@@ -2025,8 +1905,8 @@ function Show-PIMGlobalHeader {
                         }
                         $done = $true
                     } elseif ($errorMsg -like "*PendingRoleAssignmentRequest*") {
-                        # Role has a pending activation request - skip it
-                        Write-Host "⚠️ Skipped $roleName - activation already pending approval" -ForegroundColor Yellow
+                        # Role has a pending activation request in the system - skip it
+                        Write-Host "⚠️ Skipped $roleName - a pending request already exists" -ForegroundColor Yellow
                         $done = $true
                     } elseif ($errorMsg -like "*RoleAssignmentRequestAcrsValidationFailed*" -or $errorMsg -like "*&claims=*") {
                         # Conditional Access requires step-up authentication (ACRS claim)
@@ -2106,38 +1986,15 @@ function Show-PIMGlobalHeader {
         } while ($true)
         
         if ($continueChoice -eq "Yes") {
-            # Use the working choice menu logic from main script
-            $menuItems = @("Activate Roles", "Deactivate Roles")
-            $selectedIndices = Show-CheckboxMenu -Items $menuItems -Title "🔄 Choose Action" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -SingleSelection
-            
-            if ($selectedIndices.Count -gt 0) {
-                $selectedIndex = $selectedIndices[0]
-                $selectedAction = $menuItems[$selectedIndex]
-                
-                if ($selectedAction -eq "Activate Roles") {
-                    Clear-Host
-                    Show-PIMGlobalHeaderMinimal
-                    Write-Host ""
-                    Write-Host "🔄 Loading eligible roles..." -ForegroundColor Cyan -NoNewline
-                    $eligibleRoles = Get-EligibleRolesOptimized -CurrentUserId $CurrentUserId
-                    if ($eligibleRoles.Count -gt 0) {
-                        Write-Host " ✅ $($eligibleRoles.Count) found" -ForegroundColor Green
-                    } else {
-                        Write-Host ""
-                        Write-Host ""
-                    }
-                    Start-RoleActivationWorkflow -ValidRoles $eligibleRoles -CurrentUserId $CurrentUserId
-                } elseif ($selectedAction -eq "Deactivate Roles") {
-                    Start-RoleDeactivationWorkflowWithCheck -CurrentUserId $CurrentUserId
-                }
-            }
+            # Return to main workflow selector (Entra/Azure choice)
+            return
         } else {
             Write-Host "No additional roles will be managed." -ForegroundColor Red
             Write-Host ""
             Write-Host "Please close the terminal." -ForegroundColor Yellow
             Write-Host ""
             Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
-            
+
             # Hide cursor and wait for user to exit with Ctrl+Q
             [Console]::CursorVisible = $false
             do {
@@ -2151,7 +2008,7 @@ function Show-PIMGlobalHeader {
             } while ($true)
         }
     }
-    
+
     # ========================= Performance Optimization: API Caching =========================
     # Force clear all existing cache
     $global:CachedSchedules = $null
@@ -2826,7 +2683,7 @@ function Show-PIMGlobalHeader {
                 
                 # Show control bar for role selection step
                 if ($currentStep -eq 0) {
-                    Write-Host "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | ? Help | Ctrl+Q Exit" -ForegroundColor Magenta
+                    Write-Host "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | Ctrl+H Help | Ctrl+Q Exit" -ForegroundColor Magenta
                 } elseif ($currentStep -eq 1) {
                     Write-Host "Type duration | ENTER Continue | Ctrl+Q Exit" -ForegroundColor Magenta
                 } elseif ($currentStep -eq 2) {
@@ -3075,9 +2932,9 @@ function Show-PIMGlobalHeader {
                 # Show control bar for navigation (different for single vs multi-selection)
                 $controlBarTop = [Console]::CursorTop
                 if ($SingleSelection) {
-                    Write-Host "↑/↓ Navigate | SPACE Select | ENTER Confirm | ? Help | Ctrl+Q Exit" -ForegroundColor Magenta
+                    Write-Host "↑/↓ Navigate | SPACE Select | ENTER Confirm | Ctrl+H Help | Ctrl+Q Exit" -ForegroundColor Magenta
                 } else {
-                    Write-Host "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | ? Help | Ctrl+Q Exit" -ForegroundColor Magenta
+                    Write-Host "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | Ctrl+H Help | Ctrl+Q Exit" -ForegroundColor Magenta
                 }
                 
                 # Get user input
@@ -3128,14 +2985,13 @@ function Show-PIMGlobalHeader {
                     }
                 }
 
-                # Handle ? for help menu
-                if ($key.KeyChar -eq '?') {
-                    Show-HelpMenu
-                }
-                
                 # Handle Ctrl key combinations
                 if ($key.Modifiers -eq "Control") {
                     switch ($key.Key) {
+                        "H" {
+                            # Ctrl+H - Show help menu
+                            Show-HelpMenu
+                        }
                         "A" {
                             # Ctrl+A - Toggle select/deselect all items (only if not single selection)
                             if (-not $SingleSelection) {
@@ -3744,38 +3600,15 @@ function Start-RoleDeactivationWorkflow {
     } while ($true)
         
         if ($continueChoice -eq "Yes") {
-            # Use the working choice menu logic from main script
-            $menuItems = @("Activate Roles", "Deactivate Roles")
-            $selectedIndices = Show-CheckboxMenu -Items $menuItems -Title "🔄 Choose Action" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -SingleSelection
-            
-            if ($selectedIndices.Count -gt 0) {
-                $selectedIndex = $selectedIndices[0]
-                $selectedAction = $menuItems[$selectedIndex]
-                
-                if ($selectedAction -eq "Activate Roles") {
-                    Clear-Host
-                    Show-PIMGlobalHeaderMinimal
-                    Write-Host ""
-                    Write-Host "🔄 Loading eligible roles..." -ForegroundColor Cyan -NoNewline
-                    $eligibleRoles = Get-EligibleRolesOptimized -CurrentUserId $CurrentUserId
-                    if ($eligibleRoles.Count -gt 0) {
-                        Write-Host " ✅ $($eligibleRoles.Count) found" -ForegroundColor Green
-                    } else {
-                        Write-Host ""
-                        Write-Host ""
-                    }
-                    Start-RoleActivationWorkflow -ValidRoles $eligibleRoles -CurrentUserId $CurrentUserId
-                } elseif ($selectedAction -eq "Deactivate Roles") {
-                    Start-RoleDeactivationWorkflowWithCheck -CurrentUserId $CurrentUserId
-                }
-            }
+            # Return to main workflow selector (Entra/Azure choice)
+            return
         } else {
             Write-Host "No additional roles will be managed." -ForegroundColor Red
             Write-Host ""
             Write-Host "Please close the terminal." -ForegroundColor Yellow
             Write-Host ""
             Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
-            
+
             # Hide cursor and wait for user to exit with Ctrl+Q
             [Console]::CursorVisible = $false
             do {
@@ -3789,8 +3622,6 @@ function Start-RoleDeactivationWorkflow {
             } while ($true)
         }
     }
-    
-    # Script execution complete
 
 # ========================= MAIN SCRIPT EXECUTION =========================
 
@@ -4011,10 +3842,22 @@ function Stop-AzureRoleActivation {
 }
 
 function Start-AzurePIMWorkflow {
+    $script:CurrentWorkflow = 'Azure'
+
+    # Pre-load MSAL for browser-based auth with ForceLogin
+    $msalInitialized = Initialize-MSALAssemblies
+    if ($msalInitialized) {
+        try {
+            $null = Initialize-MSALHelper
+        } catch {
+            # MSAL helper init failed - will fall back to standard auth
+        }
+    }
+
     # Load Az modules with progress bar
     Clear-Host
     Write-Host ""
-    Write-Host "[ A Z U R E   P I M ]" -ForegroundColor DarkMagenta
+    Write-Host "[ A Z U R E   P I M ]" -ForegroundColor Cyan
     Write-Host "    with PowerShell" -ForegroundColor DarkGray
     Write-Host ""
 
@@ -4047,13 +3890,39 @@ function Start-AzurePIMWorkflow {
     Write-Host "  ✓ All modules ready!" -ForegroundColor Green
     Write-Host ""
 
-    # Authenticate
+    # Authenticate - Use MSAL with ForceLogin to support step-up authentication
     Write-Host "Opening browser for authentication..." -ForegroundColor Cyan
     Write-Host "Waiting for authentication response..." -ForegroundColor Yellow
 
     try {
+        # Clear existing context
         Disconnect-AzAccount -ErrorAction SilentlyContinue | Out-Null
-        $loginResult = Connect-AzAccount -ErrorAction Stop
+        Clear-AzContext -Force -ErrorAction SilentlyContinue | Out-Null
+
+        # Use MSAL with ForceLogin prompt for Azure management scope
+        $azureManagementScope = @("https://management.azure.com/.default")
+        $clientId = "1950a258-227b-4e31-a9cf-717495945fc2"  # Azure PowerShell client ID
+
+        # Get token using MSAL with ForceLogin (requires passkey/step-up auth)
+        $accessToken = [PIMBrowserAuth]::GetAccessToken($clientId, $azureManagementScope)
+
+        if (-not $accessToken) {
+            throw "Failed to acquire access token"
+        }
+
+        # Decode JWT to get account ID and tenant ID
+        $tokenParts = $accessToken.Split('.')
+        $payload = $tokenParts[1]
+        # Add padding if needed
+        $padding = 4 - ($payload.Length % 4)
+        if ($padding -ne 4) { $payload += '=' * $padding }
+        $decodedPayload = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload))
+        $claims = $decodedPayload | ConvertFrom-Json
+        $accountId = if ($claims.upn) { $claims.upn } elseif ($claims.preferred_username) { $claims.preferred_username } else { $claims.sub }
+        $tenantId = $claims.tid
+
+        # Connect to Azure using the MSAL token (without SkipValidation to avoid needing subscription)
+        $null = Connect-AzAccount -AccessToken $accessToken -AccountId $accountId -Tenant $tenantId -ErrorAction Stop
 
         $context = Get-AzContext
         if (-not $context) {
@@ -4080,7 +3949,7 @@ function Start-AzurePIMWorkflow {
             }
         }
 
-        $selectedSubIndices = Show-RoleSelectionUI -Roles $subItems -Title "Select Subscription" -DisplayProperty "Name" -SingleSelect
+        $selectedSubIndices = Show-CheckboxMenu -Items $subItems -Title "📦 Select Subscription" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -DisplayProperty "Name" -SingleSelection
 
         if ($selectedSubIndices.Count -eq 0) {
             return
@@ -4106,254 +3975,833 @@ function Start-AzurePIMWorkflow {
     Start-AzurePIMRoleManagement
 }
 
-function Start-AzurePIMRoleManagement {
-    do {
-        # Fetch roles
-        $eligibleRoles = Get-AzureEligibleRoles
-        $activeRoles = Get-AzureActiveRoles
-
-        # Filter out already active roles from eligible
-        $activeKeys = $activeRoles | ForEach-Object { "$($_.RoleDefinitionId)|$($_.Scope)" }
-        $availableForActivation = $eligibleRoles | Where-Object {
-            $key = "$($_.RoleDefinitionId)|$($_.Scope)"
-            $activeKeys -notcontains $key
-        }
-
-        # Build combined role list for display (similar to Entra PIM)
-        $allRoles = @()
-
-        foreach ($role in $availableForActivation) {
-            $allRoles += [PSCustomObject]@{
-                RoleName = $role.RoleDisplayName
-                Scope = $role.ScopeDisplayName
-                Status = "Eligible"
-                StatusColor = "Yellow"
-                RoleData = $role
-                IsActive = $false
-            }
-        }
-
-        foreach ($role in $activeRoles) {
-            $allRoles += [PSCustomObject]@{
-                RoleName = $role.RoleDisplayName
-                Scope = $role.ScopeDisplayName
-                Status = "Active"
-                StatusColor = "Green"
-                RoleData = $role
-                IsActive = $true
-            }
-        }
-
-        # Show role selection UI
-        Clear-Host
-        Write-Host ""
-        Write-Host "[ A Z U R E   P I M ]" -ForegroundColor DarkMagenta
-        Write-Host ""
-
-        if ($allRoles.Count -eq 0) {
-            Write-Host "  No eligible or active Azure roles found." -ForegroundColor Yellow
-            Write-Host ""
-            Write-Host "  [B] Back to Workflow Selection" -ForegroundColor DarkGray
-            Write-Host "  [Q] Quit" -ForegroundColor DarkGray
-            Write-Host ""
-
-            $key = [Console]::ReadKey($true)
-            if ($key.KeyChar -eq 'b' -or $key.KeyChar -eq 'B') { return }
-            if ($key.KeyChar -eq 'q' -or $key.KeyChar -eq 'Q') {
-                Disconnect-AzAccount -ErrorAction SilentlyContinue | Out-Null
-                [Environment]::Exit(0)
-            }
-            continue
-        }
-
-        # Display roles with arrow navigation
-        $selectedIndices = Show-AzureRoleSelectionUI -Roles $allRoles
-
-        if ($selectedIndices -eq "BACK") { return }
-        if ($selectedIndices -eq "QUIT") {
-            Disconnect-AzAccount -ErrorAction SilentlyContinue | Out-Null
-            [Environment]::Exit(0)
-        }
-        if ($selectedIndices.Count -eq 0) { continue }
-
-        # Process selected roles
-        $rolesToActivate = @()
-        $rolesToDeactivate = @()
-
-        foreach ($idx in $selectedIndices) {
-            $role = $allRoles[$idx]
-            if ($role.IsActive) {
-                $rolesToDeactivate += $role.RoleData
-            } else {
-                $rolesToActivate += $role.RoleData
-            }
-        }
-
-        # Handle activations
-        if ($rolesToActivate.Count -gt 0) {
-            Clear-Host
-            Write-Host ""
-            Write-Host "[ A Z U R E   P I M - Activate ]" -ForegroundColor DarkMagenta
-            Write-Host ""
-
-            # Get duration
-            Write-Host "Duration (e.g., PT1H, PT8H) [PT1H]: " -NoNewline -ForegroundColor Cyan
-            [Console]::CursorVisible = $true
-            $duration = Read-Host
-            [Console]::CursorVisible = $false
-            if ([string]::IsNullOrWhiteSpace($duration)) { $duration = "PT1H" }
-
-            # Get justification
-            Write-Host "Justification: " -NoNewline -ForegroundColor Cyan
-            [Console]::CursorVisible = $true
-            $justification = Read-Host
-            [Console]::CursorVisible = $false
-            if ([string]::IsNullOrWhiteSpace($justification)) { $justification = "PIM activation" }
-
-            Write-Host ""
-
-            foreach ($role in $rolesToActivate) {
-                Write-Host "  Activating $($role.RoleDisplayName)..." -NoNewline -ForegroundColor Cyan
-                $result = Start-AzureRoleActivation -EligibleRole $role -Justification $justification -Duration $duration
-                if ($result) {
-                    Write-Host " ✓" -ForegroundColor Green
-                } else {
-                    Write-Host " ✗" -ForegroundColor Red
-                }
-            }
-
-            Write-Host ""
-            Write-Host "Press any key to continue..." -ForegroundColor Gray
-            [Console]::ReadKey($true) | Out-Null
-        }
-
-        # Handle deactivations
-        if ($rolesToDeactivate.Count -gt 0) {
-            Clear-Host
-            Write-Host ""
-            Write-Host "[ A Z U R E   P I M - Deactivate ]" -ForegroundColor DarkMagenta
-            Write-Host ""
-
-            foreach ($role in $rolesToDeactivate) {
-                Write-Host "  Deactivating $($role.RoleDisplayName)..." -NoNewline -ForegroundColor Cyan
-                $result = Stop-AzureRoleActivation -ActiveRole $role
-                if ($result) {
-                    Write-Host " ✓" -ForegroundColor Green
-                } else {
-                    Write-Host " ✗" -ForegroundColor Red
-                }
-            }
-
-            Write-Host ""
-            Write-Host "Press any key to continue..." -ForegroundColor Gray
-            [Console]::ReadKey($true) | Out-Null
-        }
-
-    } while ($true)
+function Show-AzurePIMHeader {
+    Write-Host "[ A Z U R E   P I M ]" -ForegroundColor Cyan
 }
 
-function Show-AzureRoleSelectionUI {
+function Invoke-AzurePIMExit {
     param(
-        [array]$Roles
+        [string]$Message = "Exiting..."
     )
+
+    [Console]::CursorVisible = $true
+    Clear-Host
+    Write-Host $Message -ForegroundColor Yellow
+
+    try {
+        Disconnect-AzAccount -ErrorAction SilentlyContinue | Out-Null
+        Write-Host "✅ Disconnected from Azure." -ForegroundColor Green
+    } catch {
+        Write-Host "ℹ️ Already disconnected from Azure." -ForegroundColor DarkGray
+    }
+
+    Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 2
+    [Environment]::Exit(0)
+}
+
+function Show-AzureCheckboxMenu {
+    param(
+        [array]$Items,
+        [string]$Title = "Select Items",
+        [string]$Prompt = "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:",
+        [switch]$SingleSelection = $false
+    )
+
+    if ($Items.Count -eq 0) {
+        Write-Host "No items to select from." -ForegroundColor Red
+        return @()
+    }
 
     $selected = @{}
     $currentIndex = 0
 
-    for ($i = 0; $i -lt $Roles.Count; $i++) {
+    for ($i = 0; $i -lt $Items.Count; $i++) {
         $selected[$i] = $false
     }
 
     [Console]::CursorVisible = $false
 
-    do {
-        Clear-Host
-        Write-Host ""
-        Write-Host "[ A Z U R E   P I M ]" -ForegroundColor DarkMagenta
-        Write-Host ""
-        Write-Host "  Use ↑/↓ to navigate, SPACE to select, ENTER to confirm" -ForegroundColor DarkGray
-        Write-Host "  [B] Back  [Q] Quit" -ForegroundColor DarkGray
-        Write-Host ""
+    try {
+        do {
+            Clear-Host
+            Show-AzurePIMHeader
+            Write-Host ""
+            Write-Host $Title -ForegroundColor Cyan
+            Write-Host $("=" * $Title.Length) -ForegroundColor Cyan
+            Write-Host ""
 
-        for ($i = 0; $i -lt $Roles.Count; $i++) {
-            $role = $Roles[$i]
-            $checkbox = if ($selected[$i]) { "[✓]" } else { "[ ]" }
-            $arrow = if ($i -eq $currentIndex) { "►" } else { " " }
-            $statusColor = $role.StatusColor
+            for ($i = 0; $i -lt $Items.Count; $i++) {
+                $item = $Items[$i]
+                $checkbox = if ($selected[$i]) { "[✓]" } else { "[ ]" }
+                $arrow = if ($i -eq $currentIndex) { "► " } else { "  " }
+                $line = "$arrow$checkbox $item"
 
-            if ($i -eq $currentIndex) {
-                Write-Host "  $arrow " -NoNewline -ForegroundColor Yellow
-                Write-Host "$checkbox " -NoNewline -ForegroundColor $(if ($selected[$i]) { "Green" } else { "Gray" })
-                Write-Host "$($role.RoleName)" -NoNewline -ForegroundColor Yellow
-                Write-Host " - " -NoNewline -ForegroundColor DarkGray
-                Write-Host "$($role.Scope)" -NoNewline -ForegroundColor Yellow
-                Write-Host " [" -NoNewline -ForegroundColor DarkGray
-                Write-Host "$($role.Status)" -NoNewline -ForegroundColor $statusColor
-                Write-Host "]" -ForegroundColor DarkGray
-            } else {
-                Write-Host "  $arrow " -NoNewline -ForegroundColor DarkGray
-                Write-Host "$checkbox " -NoNewline -ForegroundColor $(if ($selected[$i]) { "Green" } else { "Gray" })
-                Write-Host "$($role.RoleName)" -NoNewline -ForegroundColor White
-                Write-Host " - " -NoNewline -ForegroundColor DarkGray
-                Write-Host "$($role.Scope)" -NoNewline -ForegroundColor Gray
-                Write-Host " [" -NoNewline -ForegroundColor DarkGray
-                Write-Host "$($role.Status)" -NoNewline -ForegroundColor $statusColor
-                Write-Host "]" -ForegroundColor DarkGray
-            }
-        }
-
-        Write-Host ""
-        $selectedCount = ($selected.Values | Where-Object { $_ }).Count
-        Write-Host "  Selected: $selectedCount" -ForegroundColor Cyan
-
-        $key = [Console]::ReadKey($true)
-
-        switch ($key.Key) {
-            "UpArrow" {
-                $currentIndex = if ($currentIndex -gt 0) { $currentIndex - 1 } else { $Roles.Count - 1 }
-            }
-            "DownArrow" {
-                $currentIndex = if ($currentIndex -lt ($Roles.Count - 1)) { $currentIndex + 1 } else { 0 }
-            }
-            "Spacebar" {
-                $selected[$currentIndex] = -not $selected[$currentIndex]
-            }
-            "Enter" {
-                $result = @()
-                for ($i = 0; $i -lt $Roles.Count; $i++) {
-                    if ($selected[$i]) { $result += $i }
+                if ($selected[$i]) {
+                    Write-Host $line -ForegroundColor Green
+                } else {
+                    Write-Host $line -ForegroundColor White
                 }
-                [Console]::CursorVisible = $true
-                return $result
             }
-            "Escape" {
-                [Console]::CursorVisible = $true
-                return @()
+
+            Write-Host ""
+            $selectedCount = ($selected.GetEnumerator() | Where-Object { $_.Value }).Count
+            $menuText = if ($Title -eq "🔄 Choose Action") { "Workflow Selected: $selectedCount" } else { "Roles Selected: $selectedCount" }
+            Write-Host $menuText -ForegroundColor Cyan
+            Write-Host ""
+
+            if ($SingleSelection) {
+                Write-Host "↑/↓ Navigate | SPACE Select | ENTER Confirm | Ctrl+H Help | Ctrl+Q Exit" -ForegroundColor Magenta
+            } else {
+                Write-Host "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | Ctrl+H Help | Ctrl+Q Exit" -ForegroundColor Magenta
             }
-            "B" {
-                [Console]::CursorVisible = $true
-                return "BACK"
+
+            $key = [Console]::ReadKey($true)
+
+            # Handle Ctrl+Q to exit
+            if ($key.Modifiers -band [ConsoleModifiers]::Control -and $key.Key -eq 'Q') {
+                Invoke-AzurePIMExit
             }
-            "Q" {
-                [Console]::CursorVisible = $true
-                return "QUIT"
+
+            # Handle Ctrl+A to select all
+            if ($key.Modifiers -band [ConsoleModifiers]::Control -and $key.Key -eq 'A' -and -not $SingleSelection) {
+                $allSelected = ($selected.Values | Where-Object { $_ }).Count -eq $Items.Count
+                for ($i = 0; $i -lt $Items.Count; $i++) {
+                    $selected[$i] = -not $allSelected
+                }
+                continue
+            }
+
+            # Handle Ctrl+H for help
+            if ($key.Modifiers -band [ConsoleModifiers]::Control -and $key.Key -eq 'H') {
+                Show-HelpMenu
+                continue
+            }
+
+            switch ($key.Key) {
+                "UpArrow" {
+                    $currentIndex = if ($currentIndex -gt 0) { $currentIndex - 1 } else { $Items.Count - 1 }
+                }
+                "DownArrow" {
+                    $currentIndex = if ($currentIndex -lt ($Items.Count - 1)) { $currentIndex + 1 } else { 0 }
+                }
+                "Spacebar" {
+                    if ($SingleSelection) {
+                        for ($i = 0; $i -lt $Items.Count; $i++) {
+                            $selected[$i] = $false
+                        }
+                        $selected[$currentIndex] = $true
+                    } else {
+                        $selected[$currentIndex] = -not $selected[$currentIndex]
+                    }
+                }
+                "Enter" {
+                    $selectedItems = @()
+                    for ($i = 0; $i -lt $Items.Count; $i++) {
+                        if ($selected[$i]) {
+                            $selectedItems += $i
+                        }
+                    }
+                    [Console]::CursorVisible = $true
+                    return $selectedItems
+                }
+                "Escape" {
+                    [Console]::CursorVisible = $true
+                    return @()
+                }
+            }
+
+        } while ($true)
+    } finally {
+        [Console]::CursorVisible = $true
+    }
+}
+
+function Start-AzurePIMRoleManagement {
+    [Console]::CursorVisible = $false
+
+    # Always show both options - same as Entra workflow
+    $menuItems = @(
+        "Activate Roles",
+        "Deactivate Roles"
+    )
+
+    # Show action menu using Azure checkbox menu
+    $selectedIndices = Show-AzureCheckboxMenu -Items $menuItems -Title "🔄 Choose Action" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -SingleSelection
+
+    if ($null -eq $selectedIndices -or $selectedIndices.Count -eq 0) {
+        return
+    }
+
+    $selectedIndex = $selectedIndices[0]
+    $selectedAction = $menuItems[$selectedIndex]
+
+    [Console]::CursorVisible = $false
+
+    if ($selectedAction -eq "Activate Roles") {
+        # Show loading message, then load roles - same as Entra
+        Clear-Host
+        Show-AzurePIMHeader
+        Write-Host ""
+        Write-Host "🔄 Loading eligible roles..." -ForegroundColor Cyan -NoNewline
+
+        $eligibleRoles = Get-AzureEligibleRoles
+        $activeRoles = Get-AzureActiveRoles
+
+        # Filter out already active roles from eligible
+        $activeKeys = $activeRoles | ForEach-Object { "$($_.RoleDefinitionId)|$($_.Scope)" }
+        $availableForActivation = @($eligibleRoles | Where-Object {
+            $key = "$($_.RoleDefinitionId)|$($_.Scope)"
+            $activeKeys -notcontains $key
+        })
+
+        if ($availableForActivation.Count -gt 0) {
+            Write-Host " ✅ $($availableForActivation.Count) found" -ForegroundColor Green
+        } else {
+            Write-Host ""
+            Write-Host ""
+        }
+
+        Start-AzureRoleActivationWorkflow -EligibleRoles $availableForActivation -ActiveRoles $activeRoles
+
+    } elseif ($selectedAction -eq "Deactivate Roles") {
+        # Show loading message, then load roles - same as Entra
+        Clear-Host
+        Show-AzurePIMHeader
+        Write-Host ""
+        Write-Host "🔄 Loading active roles..." -ForegroundColor Cyan -NoNewline
+
+        $activeRoles = Get-AzureActiveRoles
+
+        if ($activeRoles.Count -gt 0) {
+            Write-Host " ✅ $($activeRoles.Count) found" -ForegroundColor Green
+        } else {
+            Write-Host ""
+        }
+
+        Start-AzureRoleDeactivationWorkflow -ActiveRoles $activeRoles
+    }
+}
+
+function Start-AzureRoleActivationWorkflow {
+    param(
+        [array]$EligibleRoles,
+        [array]$ActiveRoles
+    )
+
+    if ($EligibleRoles.Count -eq 0) {
+        Clear-Host
+        Show-AzurePIMHeader
+        Write-Host ""
+        Write-Host "❌ No eligible roles available for activation." -ForegroundColor Red
+        Write-Host ""
+
+        if ($ActiveRoles.Count -gt 0) {
+            Write-Host "Would you like to deactivate roles instead? (Y/N): " -NoNewline -ForegroundColor Cyan
+
+            # Show cursor for Y/N input
+            [Console]::CursorVisible = $true
+
+            # Store cursor position for inline input
+            $promptLeft = [Console]::CursorLeft
+            $promptTop = [Console]::CursorTop
+
+            # Show control bar below the prompt with proper spacing
+            Write-Host "`n"  # Add blank line after prompt
+            Write-Host "Y/N to choose | Ctrl+Q Exit" -ForegroundColor Magenta
+
+            # Return cursor to inline position after the prompt (same line as Y/N question)
+            [Console]::SetCursorPosition($promptLeft, $promptTop)
+
+            $userInput = ""
+            do {
+                $key = [Console]::ReadKey($true)
+
+                # Check for Ctrl+Q
+                if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+                    Invoke-AzurePIMExit
+                    return
+                }
+
+                # Handle Enter key
+                if ($key.Key -eq 'Enter') {
+                    if ($userInput -eq 'Y') {
+                        Start-AzureRoleDeactivation -ActiveRoles $ActiveRoles
+                        return
+                    } elseif ($userInput -eq 'N') {
+                        # Show no workflows message
+                        Clear-Host
+                        Show-AzurePIMHeader
+                        Write-Host ""
+                        Write-Host "❌ No role management workflows available." -ForegroundColor Yellow
+                        Write-Host ""
+                        Write-Host "Check back later when roles are approved or activated." -ForegroundColor Gray
+                        Write-Host ""
+                        Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
+
+                        [Console]::CursorVisible = $false
+                        do {
+                            $k = [Console]::ReadKey($true)
+                            if ($k.Modifiers -band [ConsoleModifiers]::Control -and $k.Key -eq 'Q') {
+                                Invoke-AzurePIMExit
+                            }
+                        } while ($true)
+                        return
+                    } else {
+                        # Invalid input - show message
+                        Write-Host ""
+                        Write-Host "Please enter Y or N: " -NoNewline -ForegroundColor Yellow
+                        $promptLeft = [Console]::CursorLeft
+                        $promptTop = [Console]::CursorTop
+                        Write-Host "`n"
+                        Write-Host "Y/N to choose | Ctrl+Q Exit" -ForegroundColor Magenta
+                        [Console]::SetCursorPosition($promptLeft, $promptTop)
+                        $userInput = ""
+                    }
+                }
+                # Handle backspace
+                elseif ($key.Key -eq 'Backspace' -and $userInput.Length -gt 0) {
+                    $userInput = $userInput.Substring(0, $userInput.Length - 1)
+                    Write-Host "`b `b" -NoNewline
+                }
+                # Handle regular characters (Y/N only)
+                elseif ($key.KeyChar -match '[YyNn]' -and $userInput.Length -eq 0) {
+                    $userInput = $key.KeyChar.ToString().ToUpper()
+                    Write-Host $userInput -NoNewline -ForegroundColor Green
+                }
+            } while ($true)
+        } else {
+            Write-Host "❌ No role management workflows available." -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "Check back later when roles are approved or activated." -ForegroundColor Gray
+            Write-Host ""
+            Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
+
+            # Wait for Ctrl+Q to exit
+            do {
+                $key = [Console]::ReadKey($true)
+                if ($key.Modifiers -band [ConsoleModifiers]::Control -and $key.Key -eq 'Q') {
+                    Invoke-AzurePIMExit
+                }
+            } while ($true)
+        }
+        return
+    }
+
+    # Continue to role selection
+    Show-AzureRoleActivationUI -EligibleRoles $EligibleRoles
+}
+
+function Start-AzureRoleDeactivationWorkflow {
+    param([array]$ActiveRoles)
+
+    if ($ActiveRoles.Count -eq 0) {
+        Clear-Host
+        Show-AzurePIMHeader
+        Write-Host ""
+        Write-Host "❌ No active roles available for deactivation." -ForegroundColor Red
+        Write-Host ""
+
+        # Check if there are eligible roles to offer activation
+        $eligibleRoles = Get-AzureEligibleRoles
+        if ($eligibleRoles.Count -gt 0) {
+            Write-Host "Would you like to activate roles instead? (Y/N): " -NoNewline -ForegroundColor Cyan
+
+            # Show cursor for Y/N input
+            [Console]::CursorVisible = $true
+
+            # Store cursor position for inline input
+            $promptLeft = [Console]::CursorLeft
+            $promptTop = [Console]::CursorTop
+
+            # Show control bar below the prompt with proper spacing
+            Write-Host "`n"  # Add blank line after prompt
+            Write-Host "Y/N to choose | Ctrl+Q Exit" -ForegroundColor Magenta
+
+            # Return cursor to inline position after the prompt (same line as Y/N question)
+            [Console]::SetCursorPosition($promptLeft, $promptTop)
+
+            $userInput = ""
+            do {
+                $key = [Console]::ReadKey($true)
+
+                # Check for Ctrl+Q
+                if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+                    Invoke-AzurePIMExit
+                    return
+                }
+
+                # Handle Enter key
+                if ($key.Key -eq 'Enter') {
+                    if ($userInput -eq 'Y') {
+                        Show-AzureRoleActivationUI -EligibleRoles $eligibleRoles
+                        return
+                    } elseif ($userInput -eq 'N') {
+                        # Show no workflows message
+                        Clear-Host
+                        Show-AzurePIMHeader
+                        Write-Host ""
+                        Write-Host "❌ No role management workflows available." -ForegroundColor Yellow
+                        Write-Host ""
+                        Write-Host "Check back later when roles are approved or activated." -ForegroundColor Gray
+                        Write-Host ""
+                        Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
+
+                        [Console]::CursorVisible = $false
+                        do {
+                            $k = [Console]::ReadKey($true)
+                            if ($k.Modifiers -band [ConsoleModifiers]::Control -and $k.Key -eq 'Q') {
+                                Invoke-AzurePIMExit
+                            }
+                        } while ($true)
+                        return
+                    } else {
+                        # Invalid input - show message
+                        Write-Host ""
+                        Write-Host "Please enter Y or N: " -NoNewline -ForegroundColor Yellow
+                        $promptLeft = [Console]::CursorLeft
+                        $promptTop = [Console]::CursorTop
+                        Write-Host "`n"
+                        Write-Host "Y/N to choose | Ctrl+Q Exit" -ForegroundColor Magenta
+                        [Console]::SetCursorPosition($promptLeft, $promptTop)
+                        $userInput = ""
+                    }
+                }
+                # Handle backspace
+                elseif ($key.Key -eq 'Backspace' -and $userInput.Length -gt 0) {
+                    $userInput = $userInput.Substring(0, $userInput.Length - 1)
+                    Write-Host "`b `b" -NoNewline
+                }
+                # Handle regular characters (Y/N only)
+                elseif ($key.KeyChar -match '[YyNn]' -and $userInput.Length -eq 0) {
+                    $userInput = $key.KeyChar.ToString().ToUpper()
+                    Write-Host $userInput -NoNewline -ForegroundColor Green
+                }
+            } while ($true)
+        } else {
+            Write-Host "❌ No role management workflows available." -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "Check back later when roles are approved or activated." -ForegroundColor Gray
+            Write-Host ""
+            Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
+
+            # Wait for Ctrl+Q to exit
+            do {
+                $key = [Console]::ReadKey($true)
+                if ($key.Modifiers -band [ConsoleModifiers]::Control -and $key.Key -eq 'Q') {
+                    Invoke-AzurePIMExit
+                }
+            } while ($true)
+        }
+        return
+    }
+
+    # Continue to role selection
+    Start-AzureRoleDeactivation -ActiveRoles $ActiveRoles
+}
+
+function Show-AzureRoleActivationUI {
+    param([array]$EligibleRoles)
+
+    # Build role items with friendly display names (includes scope - Azure specific)
+    $roleItems = @()
+    foreach ($role in $EligibleRoles) {
+        $friendlyScope = $role.ScopeDisplayName
+        if ($role.ScopeDisplayName -match '/subscriptions/[^/]+/resourceGroups/([^/]+)') {
+            $friendlyScope = $Matches[1]
+        } elseif ($role.ScopeDisplayName -match '/subscriptions/[^/]+$') {
+            $friendlyScope = "Subscription"
+        }
+        $roleItems += "$($role.RoleDisplayName) - $friendlyScope"
+    }
+
+    # Show role selection using Azure checkbox menu
+    $selectedIndices = Show-AzureCheckboxMenu -Items $roleItems -Title "Select Roles to Activate" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:"
+
+    if ($null -eq $selectedIndices -or $selectedIndices.Count -eq 0) {
+        return
+    }
+
+    # Get selected roles
+    $rolesToActivate = @()
+    foreach ($idx in $selectedIndices) {
+        $rolesToActivate += $EligibleRoles[$idx]
+    }
+
+    # Run activation wizard
+    Show-AzureActivationWizard -RolesToActivate $rolesToActivate
+}
+
+function Show-AzureDeactivationCountdown {
+    param([array]$TooNewRoles)
+
+    try {
+        [Console]::CursorVisible = $false
+
+        Clear-Host
+        Show-AzurePIMHeader
+        Write-Host ""
+        Write-Host "⏰ Time Remaining Until Roles Can Be Deactivated" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "   (5-minute minimum activation period required)" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "   The deactivation menu will automatically refresh when timers expire" -ForegroundColor Cyan
+        Write-Host ""
+
+        # Remember the starting line for roles
+        $roleStartLine = [Console]::CursorTop
+
+        # Deduplicate roles by name
+        $uniqueRoles = @{}
+        $deduplicatedRoles = @()
+        foreach ($roleInfo in $TooNewRoles) {
+            if (-not $uniqueRoles.ContainsKey($roleInfo.RoleName)) {
+                $uniqueRoles[$roleInfo.RoleName] = $true
+                $deduplicatedRoles += $roleInfo
             }
         }
 
-        # Handle lowercase b and q
-        if ($key.KeyChar -eq 'b') {
-            [Console]::CursorVisible = $true
-            return "BACK"
+        # Show initial role lines
+        foreach ($roleInfo in $deduplicatedRoles) {
+            Write-Host "  ⏳ $($roleInfo.RoleName): --:-- remaining" -ForegroundColor Cyan
         }
-        if ($key.KeyChar -eq 'q') {
-            [Console]::CursorVisible = $true
-            return "QUIT"
-        }
+        Write-Host ""
+        Write-Host "Ctrl+Q to exit" -ForegroundColor Magenta
 
+        do {
+            $allReady = $true
+
+            # Update each role's countdown in place
+            for ($i = 0; $i -lt $deduplicatedRoles.Count; $i++) {
+                $roleInfo = $deduplicatedRoles[$i]
+                try {
+                    $activationTime = $roleInfo.ActivationTime
+                    $deactivationTime = $activationTime.AddMinutes(5)
+                    $timeRemaining = $deactivationTime - (Get-Date)
+
+                    # Position cursor at this role's line
+                    $lineNumber = $roleStartLine + $i
+                    [Console]::SetCursorPosition(0, $lineNumber)
+
+                    if ($timeRemaining.TotalSeconds -gt 0) {
+                        $allReady = $false
+                        $minutes = [int][math]::Floor($timeRemaining.TotalMinutes)
+                        $seconds = [int][math]::Floor($timeRemaining.TotalSeconds % 60)
+                        $timeDisplay = "{0:D2}:{1:D2}" -f $minutes, $seconds
+
+                        Write-Host "  ⏳ $($roleInfo.RoleName): $timeDisplay remaining" -ForegroundColor Cyan -NoNewline
+                        Write-Host (" " * ([Console]::WindowWidth - [Console]::CursorLeft - 1))
+                    } else {
+                        Write-Host "  ✅ $($roleInfo.RoleName): Ready for deactivation!" -ForegroundColor Green -NoNewline
+                        Write-Host (" " * ([Console]::WindowWidth - [Console]::CursorLeft - 1))
+                    }
+                } catch {
+                    $lineNumber = $roleStartLine + $i
+                    [Console]::SetCursorPosition(0, $lineNumber)
+                    Write-Host (" " * ([Console]::WindowWidth - 1)) -NoNewline
+                    [Console]::SetCursorPosition(0, $lineNumber)
+                    Write-Host "  ❓ $($roleInfo.RoleName): Unable to check" -ForegroundColor Yellow
+                }
+            }
+
+            # Check if user pressed a key
+            if ([Console]::KeyAvailable) {
+                $key = [Console]::ReadKey($true)
+                if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+                    Invoke-AzurePIMExit
+                }
+            }
+
+            if (-not $allReady) {
+                Start-Sleep -Seconds 1
+            }
+
+        } while (-not $allReady)
+
+        [Console]::CursorVisible = $false
+        return $true
+    } catch {
+        Write-Host "Error in countdown: $($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }
+}
+
+function Start-AzureRoleDeactivation {
+    param([array]$ActiveRoles)
+
+    # Check for roles that are too new to deactivate (5-minute rule)
+    $readyToDeactivate = @()
+    $tooNewRoles = @()
+
+    foreach ($role in $ActiveRoles) {
+        try {
+            if ($role.StartDateTime) {
+                $activationTime = [DateTime]::Parse($role.StartDateTime).ToLocalTime()
+                $timeSinceActivation = (Get-Date) - $activationTime
+
+                if ($timeSinceActivation.TotalMinutes -lt 5) {
+                    $tooNewRoles += [PSCustomObject]@{
+                        RoleName       = $role.RoleDisplayName
+                        ActivationTime = $activationTime
+                        Role           = $role
+                    }
+                } else {
+                    $readyToDeactivate += $role
+                }
+            } else {
+                # No activation time available, assume it's ready
+                $readyToDeactivate += $role
+            }
+        } catch {
+            # If error checking, assume it's ready
+            $readyToDeactivate += $role
+        }
+    }
+
+    # If some roles are too new, show countdown
+    if ($tooNewRoles.Count -gt 0) {
+        [Console]::CursorVisible = $false
+        Clear-Host
+        Show-AzurePIMHeader
+        Write-Host ""
+
+        if ($readyToDeactivate.Count -eq 0) {
+            Write-Host "⏰ All roles are within the 5-minute activation period." -ForegroundColor Yellow
+        } else {
+            Write-Host "⏰ Some roles are within the 5-minute activation period." -ForegroundColor Yellow
+        }
+        Write-Host "Showing countdown until they can be deactivated..." -ForegroundColor Cyan
+        Write-Host ""
+
+        $countdownResult = Show-AzureDeactivationCountdown -TooNewRoles $tooNewRoles
+
+        if ($countdownResult -eq $true) {
+            # Refresh active roles and restart deactivation
+            Start-AzureRoleDeactivation -ActiveRoles $ActiveRoles
+        }
+        return
+    }
+
+    # Build role items with friendly display names (includes scope - Azure specific)
+    $roleItems = @()
+    foreach ($role in $readyToDeactivate) {
+        $friendlyScope = $role.ScopeDisplayName
+        if ($role.ScopeDisplayName -match '/subscriptions/[^/]+/resourceGroups/([^/]+)') {
+            $friendlyScope = $Matches[1]
+        } elseif ($role.ScopeDisplayName -match '/subscriptions/[^/]+$') {
+            $friendlyScope = "Subscription"
+        }
+        $roleItems += "$($role.RoleDisplayName) - $friendlyScope"
+    }
+
+    # Show role selection using Azure checkbox menu
+    $selectedIndices = Show-AzureCheckboxMenu -Items $roleItems -Title "Select Roles to Deactivate" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:"
+
+    if ($null -eq $selectedIndices -or $selectedIndices.Count -eq 0) {
+        return
+    }
+
+    # Get selected roles
+    $rolesToDeactivate = @()
+    foreach ($idx in $selectedIndices) {
+        $rolesToDeactivate += $readyToDeactivate[$idx]
+    }
+
+    # Deactivate roles
+    Clear-Host
+    Show-AzurePIMHeader
+    Write-Host ""
+    Write-Host "🔄 Deactivating $($rolesToDeactivate.Count) role(s)..." -ForegroundColor Cyan
+    Write-Host ""
+
+    $successCount = 0
+    $failCount = 0
+
+    foreach ($role in $rolesToDeactivate) {
+        Write-Host "  Deactivating $($role.RoleDisplayName)..." -NoNewline -ForegroundColor Cyan
+        $result = Stop-AzureRoleActivation -ActiveRole $role
+        if ($result) {
+            Write-Host " ✓" -ForegroundColor Green
+            $successCount++
+        } else {
+            Write-Host " ✗" -ForegroundColor Red
+            $failCount++
+        }
+    }
+
+    Write-Host ""
+    if ($successCount -gt 0) {
+        Write-Host "✅ Successfully deactivated $successCount role(s)" -ForegroundColor Green
+    }
+    if ($failCount -gt 0) {
+        Write-Host "❌ Failed to deactivate $failCount role(s)" -ForegroundColor Red
+    }
+
+    Write-Host ""
+
+    # Ask if user wants to manage more roles - same as Entra workflow
+    do {
+        [Console]::CursorVisible = $true
+        $userInput = Read-PIMInput -Prompt "Would you like to manage more roles? (Y/N)" -ControlsText $script:ControlMessages['Exit']
+        if (-not $userInput) { continue }
+        $userInput = $userInput.Trim().ToUpper()
+        if ($userInput -eq "Y" -or $userInput -eq "YES") {
+            $continueChoice = "Yes"
+            break
+        } elseif ($userInput -eq "N" -or $userInput -eq "NO") {
+            $continueChoice = "No"
+            break
+        } else {
+            Write-Host "Please enter Y or N." -ForegroundColor Yellow
+        }
     } while ($true)
+
+    if ($continueChoice -eq "Yes") {
+        # Return to main workflow selector (Entra/Azure choice)
+        return
+    } else {
+        Write-Host "No additional roles will be managed." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Please close the terminal." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
+
+        # Hide cursor and wait for user to exit with Ctrl+Q
+        [Console]::CursorVisible = $false
+        do {
+            if ([Console]::KeyAvailable) {
+                $key = [Console]::ReadKey($true)
+                if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+                    Invoke-AzurePIMExit
+                    return
+                }
+            }
+            Start-Sleep -Milliseconds 100
+        } while ($true)
+    }
+}
+
+function Show-AzureActivationWizard {
+    param(
+        [array]$RolesToActivate
+    )
+
+    # Clear screen and show header - same as Entra workflow
+    Clear-Host
+    Show-AzurePIMHeader
+    Write-Host ""
+
+    # Duration input - same as Entra workflow
+    do {
+        $durationInput = Read-PIMInput -Prompt "Enter activation duration (e.g., 1H, 30M, 2H30M)" -ControlsText $script:ControlMessages['Input']
+
+        if ([string]::IsNullOrWhiteSpace($durationInput) -or $durationInput -notmatch '^\d+[HM]') {
+            Write-Host "ERROR: Invalid format. Use '1H', '30M', or '2H30M'." -ForegroundColor Red
+        }
+    } while ([string]::IsNullOrWhiteSpace($durationInput) -or $durationInput -notmatch '^\d+[HM]')
+
+    # Convert duration to ISO 8601 format
+    $duration = $durationInput.ToUpper() -replace '(\d+)H', 'PT${1}H' -replace '(\d+)M', '${1}M'
+    if ($duration -match '^\d+M$') { $duration = "PT$duration" }
+
+    # Parse duration to check if it's less than 5 minutes
+    $totalMinutes = 0
+    if ($durationInput.ToUpper() -match '(\d+)H') { $totalMinutes += [int]$matches[1] * 60 }
+    if ($durationInput.ToUpper() -match '(\d+)M') { $totalMinutes += [int]$matches[1] }
+
+    if ($totalMinutes -lt 5) {
+        Write-Host ""
+        Write-Host "❌ Activation Duration too short: Minimum Required is 5 minutes." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Press any key to continue..." -ForegroundColor Yellow
+        $null = [Console]::ReadKey($true)
+        return $false
+    }
+
+    # Justification input - same as Entra workflow
+    $justification = Read-PIMInput -Prompt "Enter reason for activation" -ControlsText $script:ControlMessages['Input']
+
+    if ([string]::IsNullOrWhiteSpace($justification)) {
+        Write-Host "Justification is required." -ForegroundColor Red
+        return $false
+    }
+
+    Write-Host "🔄 Activating $($RolesToActivate.Count) role(s)..." -ForegroundColor Cyan
+    Write-Host ""
+
+    $successCount = 0
+    $failCount = 0
+
+    foreach ($role in $RolesToActivate) {
+        $roleName = $role.RoleDisplayName
+        Write-Host "  Activating $roleName..." -NoNewline -ForegroundColor Cyan
+        $result = Start-AzureRoleActivation -EligibleRole $role -Justification $justification -Duration $duration
+        if ($result) {
+            Write-Host " ✓" -ForegroundColor Green
+            $successCount++
+        } else {
+            Write-Host " ✗" -ForegroundColor Red
+            $failCount++
+        }
+    }
+
+    Write-Host ""
+    if ($successCount -gt 0) {
+        Write-Host "✅ Successfully activated $successCount role(s)" -ForegroundColor Green
+    }
+    if ($failCount -gt 0) {
+        Write-Host "❌ Failed to activate $failCount role(s)" -ForegroundColor Red
+    }
+
+    Write-Host ""
+
+    # Ask if user wants to manage more roles - same as Entra workflow
+    do {
+        [Console]::CursorVisible = $true
+        $userInput = Read-PIMInput -Prompt "Would you like to manage more roles? (Y/N)" -ControlsText $script:ControlMessages['Exit']
+        if (-not $userInput) { continue }
+        $userInput = $userInput.Trim().ToUpper()
+        if ($userInput -eq "Y" -or $userInput -eq "YES") {
+            $continueChoice = "Yes"
+            break
+        } elseif ($userInput -eq "N" -or $userInput -eq "NO") {
+            $continueChoice = "No"
+            break
+        } else {
+            Write-Host "Please enter Y or N." -ForegroundColor Yellow
+        }
+    } while ($true)
+
+    if ($continueChoice -eq "Yes") {
+        # Return to main workflow selector (Entra/Azure choice)
+        return
+    } else {
+        Write-Host "No additional roles will be managed." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Please close the terminal." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
+
+        # Hide cursor and wait for user to exit with Ctrl+Q
+        [Console]::CursorVisible = $false
+        do {
+            if ([Console]::KeyAvailable) {
+                $key = [Console]::ReadKey($true)
+                if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+                    Invoke-AzurePIMExit
+                    return
+                }
+            }
+            Start-Sleep -Milliseconds 100
+        } while ($true)
+    }
+
+    return $true
 }
 
 function Start-EntraPIMWorkflow {
+    $script:CurrentWorkflow = 'Entra'
+
     # Pre-load MSAL and compile helper BEFORE Graph modules load their own MSAL
     $msalInitialized = Initialize-MSALAssemblies
     if ($msalInitialized) {
