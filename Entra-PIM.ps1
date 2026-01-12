@@ -1,146 +1,148 @@
 # ========================= Authentication =========================
 # Global variable to store assembly paths
-$script:WAMAssemblyPaths = @{}
+$script:MSALAssemblyPaths = @{}
 
-function Initialize-WAMAssemblies {
+function Initialize-MSALAssemblies {
     <#
     .SYNOPSIS
-        Loads the required MSAL assemblies from Az.Accounts for WAM authentication.
+        Loads MSAL assemblies for browser-based authentication (no WAM).
     #>
-    
-    # Check if Az.Accounts is loaded, if not load it
-    $LoadedAzAccountsModule = Get-Module -Name Az.Accounts
-    if ($null -eq $LoadedAzAccountsModule) {
-        $AzAccountsModule = Get-Module -Name Az.Accounts -ListAvailable | Select-Object -First 1
-        if ($null -eq $AzAccountsModule) {
-            Write-Verbose "Az.Accounts module not found"
-            return $false
+
+    # Try to find MSAL from nuget cache first
+    $nugetPath = Join-Path $env:USERPROFILE ".nuget\packages\microsoft.identity.client"
+    $msalDll = $null
+    $abstractionsDll = $null
+
+    if (Test-Path $nugetPath) {
+        # Get latest version
+        $latestVersion = Get-ChildItem $nugetPath -Directory | Sort-Object Name -Descending | Select-Object -First 1
+        if ($latestVersion) {
+            $msalDll = Join-Path $latestVersion.FullName "lib\net6.0\Microsoft.Identity.Client.dll"
+            if (-not (Test-Path $msalDll)) {
+                $msalDll = Join-Path $latestVersion.FullName "lib\netstandard2.0\Microsoft.Identity.Client.dll"
+            }
         }
-        Import-Module Az.Accounts -ErrorAction SilentlyContinue -Verbose:$false
+
+        # Find abstractions
+        $abstractionsPath = Join-Path $env:USERPROFILE ".nuget\packages\microsoft.identitymodel.abstractions"
+        if (Test-Path $abstractionsPath) {
+            $latestAbstractions = Get-ChildItem $abstractionsPath -Directory | Sort-Object Name -Descending | Select-Object -First 1
+            if ($latestAbstractions) {
+                $abstractionsDll = Join-Path $latestAbstractions.FullName "lib\net6.0\Microsoft.IdentityModel.Abstractions.dll"
+                if (-not (Test-Path $abstractionsDll)) {
+                    $abstractionsDll = Join-Path $latestAbstractions.FullName "lib\netstandard2.0\Microsoft.IdentityModel.Abstractions.dll"
+                }
+            }
+        }
     }
-    
-    # Find the Azure.Common assembly location
-    $LoadedAssemblies = [System.AppDomain]::CurrentDomain.GetAssemblies() | Select-Object -ExpandProperty Location -ErrorAction SilentlyContinue
-    $AzureCommon = $LoadedAssemblies | Where-Object { $_ -match "\\Modules\\Az.Accounts\\" -and $_ -match "Microsoft.Azure.Common" }
-    
-    if (-not $AzureCommon) {
-        Write-Verbose "Could not find Microsoft.Azure.Common assembly"
+
+    # Fallback to Az.Accounts if nuget not available
+    if (-not $msalDll -or -not (Test-Path $msalDll)) {
+        $LoadedAzAccountsModule = Get-Module -Name Az.Accounts
+        if ($null -eq $LoadedAzAccountsModule) {
+            $AzAccountsModule = Get-Module -Name Az.Accounts -ListAvailable | Select-Object -First 1
+            if ($null -eq $AzAccountsModule) {
+                Write-Verbose "Neither nuget cache nor Az.Accounts module found for MSAL"
+                return $false
+            }
+            Import-Module Az.Accounts -ErrorAction SilentlyContinue -Verbose:$false
+        }
+
+        $LoadedAssemblies = [System.AppDomain]::CurrentDomain.GetAssemblies() | Select-Object -ExpandProperty Location -ErrorAction SilentlyContinue
+        $AzureCommon = $LoadedAssemblies | Where-Object { $_ -match "\\Modules\\Az.Accounts\\" -and $_ -match "Microsoft.Azure.Common" }
+
+        if ($AzureCommon) {
+            $AzureCommonLocation = Split-Path -Parent $AzureCommon
+            $foundMsal = Get-ChildItem -Path $AzureCommonLocation -Filter "Microsoft.Identity.Client.dll" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+            $foundAbstractions = Get-ChildItem -Path $AzureCommonLocation -Filter "Microsoft.IdentityModel.Abstractions.dll" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($foundMsal) { $msalDll = $foundMsal.FullName }
+            if ($foundAbstractions) { $abstractionsDll = $foundAbstractions.FullName }
+        }
+    }
+
+    if (-not $msalDll -or -not (Test-Path $msalDll)) {
+        Write-Verbose "Could not find Microsoft.Identity.Client.dll"
         return $false
     }
-    
-    $AzureCommonLocation = Split-Path -Parent $AzureCommon
-    
-    # Find and load required MSAL assemblies for WAM
-    $requiredAssemblies = @(
-        'Microsoft.IdentityModel.Abstractions.dll',
-        'Microsoft.Identity.Client.dll',
-        'Microsoft.Identity.Client.Broker.dll',
-        'Microsoft.Identity.Client.NativeInterop.dll',
-        'Microsoft.Identity.Client.Extensions.Msal.dll',
-        'System.Security.Cryptography.ProtectedData.dll'
-    )
-    
+
+    # Load assemblies
     $loadedAssembliesCheck = [System.AppDomain]::CurrentDomain.GetAssemblies()
-    
-    foreach ($assemblyFile in $requiredAssemblies) {
-        $assemblyName = $assemblyFile.Replace('.dll', '')
-        $alreadyLoaded = $loadedAssembliesCheck | Where-Object { $_.GetName().Name -eq $assemblyName }
-        
+
+    # Load abstractions first if available
+    if ($abstractionsDll -and (Test-Path $abstractionsDll)) {
+        $alreadyLoaded = $loadedAssembliesCheck | Where-Object { $_.GetName().Name -eq 'Microsoft.IdentityModel.Abstractions' }
         if (-not $alreadyLoaded) {
-            $found = Get-ChildItem -Path $AzureCommonLocation -Filter $assemblyFile -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
-            if ($found) {
-                try {
-                    [void][System.Reflection.Assembly]::LoadFrom($found.FullName)
-                    $script:WAMAssemblyPaths[$assemblyName] = $found.FullName
-                } catch { }
-            }
-        } else {
-            $script:WAMAssemblyPaths[$assemblyName] = $alreadyLoaded.Location
-        }
-    }
-    
-    # Load System.Diagnostics.TraceSource.dll from .NET Core (required for WAM)
-    $RuntimeFrameworkMajorVersion = [System.Runtime.InteropServices.RuntimeInformation]::FrameworkDescription.Split()[-1].Split(".")[0]
-    $dotNetDirectory = Get-ChildItem -Path "C:\Program Files\dotnet\packs\Microsoft.NETCore.App.Ref" -Filter "$RuntimeFrameworkMajorVersion.*" -Directory -ErrorAction SilentlyContinue | 
-        Sort-Object -Property Name -Descending | Select-Object -First 1
-    if ($dotNetDirectory) {
-        $sdts = Get-ChildItem -Path $dotNetDirectory.FullName -Filter "System.Diagnostics.TraceSource.dll" -Recurse -File -ErrorAction SilentlyContinue | Select-Object -First 1
-        if ($sdts) {
             try {
-                [void][System.Reflection.Assembly]::LoadFrom($sdts.FullName)
-                $script:WAMAssemblyPaths['System.Diagnostics.TraceSource'] = $sdts.FullName
+                [void][System.Reflection.Assembly]::LoadFrom($abstractionsDll)
+                $script:MSALAssemblyPaths['Microsoft.IdentityModel.Abstractions'] = $abstractionsDll
             } catch { }
+        } else {
+            $script:MSALAssemblyPaths['Microsoft.IdentityModel.Abstractions'] = $alreadyLoaded.Location
         }
     }
-    
+
+    # Load MSAL
+    $alreadyLoaded = $loadedAssembliesCheck | Where-Object { $_.GetName().Name -eq 'Microsoft.Identity.Client' }
+    if (-not $alreadyLoaded) {
+        try {
+            [void][System.Reflection.Assembly]::LoadFrom($msalDll)
+            $script:MSALAssemblyPaths['Microsoft.Identity.Client'] = $msalDll
+        } catch {
+            Write-Verbose "Failed to load MSAL: $_"
+            return $false
+        }
+    } else {
+        $script:MSALAssemblyPaths['Microsoft.Identity.Client'] = $alreadyLoaded.Location
+    }
+
     return $true
 }
 
-# Global to track if WAM helper is compiled
-$script:WAMHelperCompiled = $false
+# Global to track if MSAL helper is compiled
+$script:MSALHelperCompiled = $false
 
-function Initialize-WAMHelper {
+function Initialize-MSALHelper {
     <#
     .SYNOPSIS
-        Pre-compiles the WAM helper C# code before Graph modules load conflicting MSAL versions.
+        Pre-compiles the MSAL helper C# code for browser-based authentication.
     #>
-    
-    if ($script:WAMHelperCompiled) { return $true }
-    
-    # Get referenced assemblies for Add-Type (must include all MSAL and .NET Core assemblies)
+
+    if ($script:MSALHelperCompiled) { return $true }
+
+    # Get referenced assemblies for Add-Type
     $referencedAssemblies = @(
-        $script:WAMAssemblyPaths['Microsoft.IdentityModel.Abstractions'],
-        $script:WAMAssemblyPaths['Microsoft.Identity.Client'],
-        $script:WAMAssemblyPaths['Microsoft.Identity.Client.Broker'],
-        $script:WAMAssemblyPaths['Microsoft.Identity.Client.NativeInterop'],
-        $script:WAMAssemblyPaths['Microsoft.Identity.Client.Extensions.Msal'],
-        $script:WAMAssemblyPaths['System.Security.Cryptography.ProtectedData'],
-        $script:WAMAssemblyPaths['System.Diagnostics.TraceSource']
+        $script:MSALAssemblyPaths['Microsoft.IdentityModel.Abstractions'],
+        $script:MSALAssemblyPaths['Microsoft.Identity.Client']
     ) | Where-Object { $_ }
-    
-    if ($referencedAssemblies.Count -lt 4) {
-        throw "Missing required MSAL assemblies for WAM"
+
+    if ($referencedAssemblies.Count -lt 1) {
+        throw "Missing required MSAL assemblies"
     }
-    
+
     # Add standard assemblies
     $referencedAssemblies += @("netstandard", "System.Linq", "System.Threading.Tasks")
-    
-    # C# code for WAM authentication
+
+    # C# code for browser-based authentication (no WAM)
     $code = @"
 using System;
 using System.Linq;
-using System.Runtime.InteropServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Identity.Client;
-using Microsoft.Identity.Client.Broker;
 
-public class PIMWAMBroker
+public class PIMBrowserAuth
 {
-    [DllImport("user32.dll", ExactSpelling = true)]
-    public static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
-    [DllImport("kernel32.dll")]
-    public static extern IntPtr GetConsoleWindow();
-    
-    public static IntPtr GetConsoleOrTerminalWindow()
+    public static string GetAccessToken(string clientId, string[] scopes)
     {
-        IntPtr consoleHandle = GetConsoleWindow();
-        if (consoleHandle == IntPtr.Zero) return IntPtr.Zero;
-        IntPtr handle = GetAncestor(consoleHandle, 3);
-        return (handle != IntPtr.Zero) ? handle : consoleHandle;
+        return GetAccessTokenWithClaims(clientId, scopes, null);
     }
-    
-    public static string GetAccessToken(string clientId, string redirectUri, string[] scopes)
-    {
-        return GetAccessTokenWithClaims(clientId, redirectUri, scopes, null);
-    }
-    
-    public static string GetAccessTokenWithClaims(string clientId, string redirectUri, string[] scopes, string claims)
+
+    public static string GetAccessTokenWithClaims(string clientId, string[] scopes, string claims)
     {
         try
         {
-            var task = Task.Run(async () => await GetAccessTokenAsync(clientId, redirectUri, scopes, claims));
-            if (task.Wait(TimeSpan.FromSeconds(120)))
+            var task = Task.Run(async () => await GetAccessTokenAsync(clientId, scopes, claims));
+            if (task.Wait(TimeSpan.FromSeconds(180)))
             {
                 return task.Result;
             }
@@ -152,84 +154,78 @@ public class PIMWAMBroker
             throw;
         }
     }
-    
-    private static async Task<string> GetAccessTokenAsync(string clientId, string redirectUri, string[] scopes, string claims)
+
+    private static async Task<string> GetAccessTokenAsync(string clientId, string[] scopes, string claims)
     {
-        var brokerOptions = new BrokerOptions(BrokerOptions.OperatingSystems.Windows)
-        {
-            Title = "Entra PIM - Sign In"
-        };
-        
+        // Use system browser to bypass Windows PRT - forces fresh passkey auth every time
         IPublicClientApplication publicClientApp = PublicClientApplicationBuilder.Create(clientId)
-            .WithBroker(brokerOptions)
-            .WithParentActivityOrWindow(GetConsoleOrTerminalWindow)
-            .WithRedirectUri(redirectUri)
+            .WithRedirectUri("http://localhost")
             .Build();
-        
+
         using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(180)))
         {
             var builder = publicClientApp.AcquireTokenInteractive(scopes)
-                .WithPrompt(Prompt.SelectAccount);
-            
+                .WithPrompt(Prompt.ForceLogin)
+                .WithUseEmbeddedWebView(false);
+
             // Add claims challenge if provided (for Conditional Access step-up)
             if (!string.IsNullOrEmpty(claims))
             {
                 builder = builder.WithClaims(claims);
             }
-            
+
             var result = await builder
                 .ExecuteAsync(cts.Token)
                 .ConfigureAwait(false);
-            
+
             return result.AccessToken;
         }
     }
 }
 "@
-    
+
     # Check if type already exists
     try {
-        $null = [PIMWAMBroker]
-        $script:WAMHelperCompiled = $true
+        $null = [PIMBrowserAuth]
+        $script:MSALHelperCompiled = $true
         return $true
     } catch {
         # Type doesn't exist, compile it
     }
-    
-    Add-Type -ReferencedAssemblies $referencedAssemblies -TypeDefinition $code -Language CSharp -ErrorAction Stop -IgnoreWarnings
-    
-    $script:WAMHelperCompiled = $true
+
+    Add-Type -ReferencedAssemblies $referencedAssemblies -TypeDefinition $code -Language CSharp -ErrorAction Stop -IgnoreWarnings 3>$null
+
+    $script:MSALHelperCompiled = $true
     return $true
 }
 
-function Get-WAMAccessToken {
+function Get-BrowserAccessToken {
     <#
     .SYNOPSIS
-        Gets an access token using Windows Web Account Manager (WAM) via custom MSAL.
+        Gets an access token using browser-based authentication (forces fresh passkey auth).
     #>
     param(
         [string[]]$Scopes
     )
-    
-    # Ensure WAM helper is compiled
-    if (-not $script:WAMHelperCompiled) {
-        $null = Initialize-WAMHelper
+
+    # Ensure MSAL helper is compiled
+    if (-not $script:MSALHelperCompiled) {
+        $null = Initialize-MSALHelper
     }
-    
+
     # Use Microsoft's well-known PowerShell public client ID (no app registration required)
     $clientId = "14d82eec-204b-4c2f-b7e8-296a70dab67e"
-    $redirectUri = "http://localhost"
-    
+
     # Build scopes string for Graph
-    $scopeArray = $Scopes | ForEach-Object { 
+    $scopeArray = $Scopes | ForEach-Object {
         if ($_ -notlike "https://*") { "https://graph.microsoft.com/$_" } else { $_ }
     }
-    
-    $accessToken = [PIMWAMBroker]::GetAccessToken($clientId, $redirectUri, $scopeArray)
+
+    $accessToken = [PIMBrowserAuth]::GetAccessToken($clientId, $scopeArray)
     return $accessToken
 }
 
-function Get-WAMAccessTokenWithClaims {
+function Get-BrowserAccessTokenWithClaims {
     <#
     .SYNOPSIS
         Gets an access token with claims challenge for Conditional Access step-up authentication.
@@ -238,48 +234,49 @@ function Get-WAMAccessTokenWithClaims {
         [string[]]$Scopes,
         [string]$Claims
     )
-    
-    # Ensure WAM helper is compiled
-    if (-not $script:WAMHelperCompiled) {
-        $null = Initialize-WAMHelper
+
+    # Ensure MSAL helper is compiled
+    if (-not $script:MSALHelperCompiled) {
+        $null = Initialize-MSALHelper
     }
-    
+
     # Use Microsoft's well-known PowerShell public client ID (no app registration required)
     $clientId = "14d82eec-204b-4c2f-b7e8-296a70dab67e"
-    $redirectUri = "http://localhost"
-    
+
     # Build scopes string for Graph
-    $scopeArray = $Scopes | ForEach-Object { 
+    $scopeArray = $Scopes | ForEach-Object {
         if ($_ -notlike "https://*") { "https://graph.microsoft.com/$_" } else { $_ }
     }
-    
-    $accessToken = [PIMWAMBroker]::GetAccessTokenWithClaims($clientId, $redirectUri, $scopeArray, $Claims)
+
+    $accessToken = [PIMBrowserAuth]::GetAccessTokenWithClaims($clientId, $scopeArray, $Claims)
     return $accessToken
 }
 
-# ========================= WAM Authentication =========================
-function Connect-MgGraphWithWAM {
+# ========================= Browser Authentication =========================
+function Connect-MgGraphWithBrowser {
     param(
         [string[]]$Scopes
     )
-    
+
     try {
         # Clear any existing Graph context first
         try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch { }
-        
-        Write-Host "Authenticating..." -ForegroundColor Cyan
-        
-        # Use custom WAM helper with pre-loaded MSAL assemblies to avoid version conflicts
-        if ($script:WAMHelperCompiled) {
-            $accessToken = Get-WAMAccessToken -Scopes $Scopes
+
+        Write-Host "Opening browser for authentication..." -ForegroundColor Cyan
+
+        # Use custom MSAL helper for browser auth with forced login
+        if ($script:MSALHelperCompiled) {
+            Write-Host "Waiting for authentication response..." -ForegroundColor Yellow
+            $accessToken = Get-BrowserAccessToken -Scopes $Scopes
             if ($accessToken) {
+                Write-Host "Authentication successful, connecting to Graph..." -ForegroundColor Cyan
                 $secureToken = ConvertTo-SecureString $accessToken -AsPlainText -Force
                 Connect-MgGraph -AccessToken $secureToken -NoWelcome -ErrorAction Stop
             } else {
-                throw "Failed to get access token from WAM"
+                throw "Failed to get access token"
             }
         } else {
-            throw "WAM helper not initialized - Az.Accounts module may be missing"
+            throw "MSAL helper not initialized - could not find Microsoft.Identity.Client.dll"
         }
         
         $context = Get-MgContext
@@ -2044,7 +2041,7 @@ function Show-PIMGlobalHeader {
                             try {
                                 # Get new token with claims challenge
                                 $scopes = @('RoleManagement.ReadWrite.Directory', 'Directory.Read.All')
-                                $newToken = Get-WAMAccessTokenWithClaims -Scopes $scopes -Claims $decodedClaims
+                                $newToken = Get-BrowserAccessTokenWithClaims -Scopes $scopes -Claims $decodedClaims
                                 
                                 if ($newToken) {
                                     # Reconnect to Graph with new token
@@ -3124,16 +3121,13 @@ function Show-PIMGlobalHeader {
                         return @()
                     }
                     "Q" {
-            Write-Host ""
-                        Write-Host "Exiting..." -ForegroundColor Yellow
-                            Disconnect-MgGraph | Out-Null
-                        Write-Host "Disconnected from Microsoft Graph." -ForegroundColor Green
-                        Write-Host "Terminal will close in 3 seconds..." -ForegroundColor Yellow
-                        Start-Sleep -Seconds 3
-                        [Environment]::Exit(0)
+                        # Only exit if Ctrl is held
+                        if ($key.Modifiers -eq "Control") {
+                            Invoke-PIMExit -Message "Exiting PIM role management..."
+                        }
                     }
                 }
-                
+
                 # Handle ? for help menu
                 if ($key.KeyChar -eq '?') {
                     Show-HelpMenu
@@ -3800,6 +3794,8 @@ function Start-RoleDeactivationWorkflow {
     
 # ========================= MAIN SCRIPT EXECUTION =========================
 
+try {
+
 Clear-Host
 Write-Host "[ E N T R A   P I M ]" -ForegroundColor Cyan
 Write-Host "    with PowerShell" -ForegroundColor DarkGray
@@ -3843,13 +3839,14 @@ if ($missingModules.Count -gt 0) {
     Write-Host ""
 }
 
-# Pre-load Az.Accounts FIRST and compile WAM helper BEFORE Graph modules load their own MSAL
-$wamInitialized = Initialize-WAMAssemblies
-if ($wamInitialized) {
+# Pre-load MSAL and compile helper BEFORE Graph modules load their own MSAL
+$msalInitialized = Initialize-MSALAssemblies
+if ($msalInitialized) {
     try {
-        $null = Initialize-WAMHelper
+        $null = Initialize-MSALHelper
     } catch {
-        $wamInitialized = $false
+        Write-Host "MSAL Helper compile error: $($_.Exception.Message)" -ForegroundColor Red
+        $msalInitialized = $false
     }
 }
 
@@ -3900,11 +3897,13 @@ Write-Host ""
 # Connect to Microsoft Graph using manual browser authentication
 try {
     $scopes = @('RoleManagement.ReadWrite.Directory', 'Directory.Read.All')
-    $connected = Connect-MgGraphWithWAM -Scopes $scopes
+    $connected = Connect-MgGraphWithBrowser -Scopes $scopes
     
     if (-not $connected) {
         Write-Host "❌ Failed to connect to Microsoft Graph" -ForegroundColor Red
-        exit 1
+        Write-Host "Press Enter to exit..." -ForegroundColor Yellow
+        Read-Host
+        throw "Connection failed"
     }
     
     Write-Host "✅ Successfully connected to Microsoft Graph" -ForegroundColor Green
@@ -3917,9 +3916,24 @@ try {
     Initialize-RoleDefinitionCache
 } catch {
     Write-Host "❌ Failed to connect to Microsoft Graph: $($_.Exception.Message)" -ForegroundColor Red
-    exit 1
+    Write-Host "Press Enter to exit..." -ForegroundColor Yellow
+    Read-Host
+    throw
 }
 
 # Start the PIM role management workflow
 [Console]::CursorVisible = $true
 Start-PIMRoleManagement -CurrentUserId $currentUserId
+
+}
+catch {
+    Write-Host "ERROR: $($_.Exception.Message)" -ForegroundColor Red
+    Write-Host "Press Enter to see details..." -ForegroundColor Yellow
+    Read-Host
+    Write-Host $_.ScriptStackTrace -ForegroundColor Red
+    Read-Host
+}
+finally {
+    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+    [Environment]::Exit(0)
+}

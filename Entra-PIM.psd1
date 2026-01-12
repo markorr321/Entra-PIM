@@ -6,7 +6,7 @@
     RootModule = 'Entra-PIM.psm1'
 
     # Version number of this module (SemVer format for PSResourceGet)
-    ModuleVersion = '1.6.2'
+    ModuleVersion = '1.7.0'
 
     # ID used to uniquely identify this module
     GUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
@@ -21,7 +21,7 @@
     Copyright = '(c) 2025. All rights reserved.'
 
     # Description of the functionality provided by this module
-    Description = 'Simplify Microsoft Entra PIM role management with an interactive console experience. Features Windows native SSO via WAM (Web Account Manager), automatic step-up MFA handling, one-command activation/deactivation of eligible roles, and auto-installation of dependencies. Just run Start-EntraPIM - no app registration or complex configuration required.'
+    Description = 'Simplify Microsoft Entra PIM role management with an interactive console experience. Features browser-based authentication with passkey/FIDO2 support, automatic step-up MFA handling, one-command activation/deactivation of eligible roles, and auto-installation of dependencies. Just run Start-EntraPIM - no app registration or complex configuration required.'
 
     # Minimum version of the PowerShell engine required by this module
     PowerShellVersion = '7.0'
@@ -58,6 +58,12 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+## 1.7.0
+- Switched from WAM to browser-based authentication
+- WAM was caching Windows PRT credentials and bypassing Conditional Access step-up requirements
+- Browser auth with MSAL ensures fresh authentication and proper passkey/FIDO2 enforcement
+- Step-up authentication now correctly prompts for hardware keys when required by CA policies
+
 ## 1.6.0
 - Added step-up authentication support for PIM role activations
 - Handles MFA/claims challenges automatically when activating privileged roles
