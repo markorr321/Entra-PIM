@@ -5020,56 +5020,66 @@ function Install-Prerequisites {
 
 # ========================= Main Entry Point =========================
 
+# Cleanup function for graceful exit
+function Invoke-GracefulExit {
+    param([string]$Reason = "Exiting...")
+
+    [Console]::CursorVisible = $true
+    Clear-Host
+    Write-Host $Reason -ForegroundColor Yellow
+
+    # Disconnect from Microsoft Graph if connected
+    try {
+        $mgContext = Get-MgContext -ErrorAction SilentlyContinue
+        if ($mgContext) {
+            Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+            Write-Host "✅ Disconnected from Microsoft Graph." -ForegroundColor Green
+        }
+    } catch { }
+
+    # Disconnect from Azure if connected
+    try {
+        $azContext = Get-AzContext -ErrorAction SilentlyContinue
+        if ($azContext) {
+            Disconnect-AzAccount -ErrorAction SilentlyContinue | Out-Null
+            Clear-AzContext -Force -ErrorAction SilentlyContinue | Out-Null
+            Write-Host "✅ Disconnected from Azure." -ForegroundColor Green
+        }
+    } catch { }
+
+    if ($script:IsRunningOnMac) {
+        Write-Host ""
+        Write-Host "Closing terminal in 2 seconds..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 2
+        & osascript -e 'tell application "Terminal" to close first window' 2>$null
+    } else {
+        Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 2
+        [Environment]::Exit(0)
+    }
+}
+
 # Install prerequisites before starting
 Install-Prerequisites
 
-do {
-    $workflow = Show-WorkflowSelector
+# Main loop with Ctrl+C handling
+try {
+    do {
+        $workflow = Show-WorkflowSelector
 
-    switch ($workflow) {
-        'Entra' {
-            Start-EntraPIMWorkflow
-        }
-        'Azure' {
-            Start-AzurePIMWorkflow
-        }
-        'Quit' {
-            Clear-Host
-            Write-Host "Exiting..." -ForegroundColor Yellow
-
-            # Disconnect from Microsoft Graph if connected
-            try {
-                $mgContext = Get-MgContext -ErrorAction SilentlyContinue
-                if ($mgContext) {
-                    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
-                    Write-Host "✅ Disconnected from Microsoft Graph." -ForegroundColor Green
-                }
-            } catch {
-                Write-Host "ℹ️ Already disconnected from Microsoft Graph." -ForegroundColor DarkGray
+        switch ($workflow) {
+            'Entra' {
+                Start-EntraPIMWorkflow
             }
-
-            # Disconnect from Azure if connected
-            try {
-                $azContext = Get-AzContext -ErrorAction SilentlyContinue
-                if ($azContext) {
-                    Disconnect-AzAccount -ErrorAction SilentlyContinue | Out-Null
-                    Clear-AzContext -Force -ErrorAction SilentlyContinue | Out-Null
-                    Write-Host "✅ Disconnected from Azure." -ForegroundColor Green
-                }
-            } catch {
-                Write-Host "ℹ️ Already disconnected from Azure." -ForegroundColor DarkGray
+            'Azure' {
+                Start-AzurePIMWorkflow
             }
-
-            if ($script:IsRunningOnMac) {
-                Write-Host ""
-                Write-Host "Closing terminal in 2 seconds..." -ForegroundColor Yellow
-                Start-Sleep -Seconds 2
-                & osascript -e 'tell application "Terminal" to close first window' 2>$null
-            } else {
-                Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
-                Start-Sleep -Seconds 2
-                [Environment]::Exit(0)
+            'Quit' {
+                Invoke-GracefulExit -Reason "Exiting..."
             }
         }
-    }
-} while ($true)
+    } while ($true)
+} finally {
+    # Handle Ctrl+C or any unexpected termination
+    Invoke-GracefulExit -Reason "Interrupted - cleaning up..."
+}

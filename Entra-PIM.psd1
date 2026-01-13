@@ -6,7 +6,7 @@
     RootModule = 'Entra-PIM.psm1'
 
     # Version number of this module (SemVer format for PSResourceGet)
-    ModuleVersion = '2.0.1'
+    ModuleVersion = '2.0.2'
 
     # ID used to uniquely identify this module
     GUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
@@ -58,6 +58,9 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+## 2.0.2
+- Handle Ctrl+C gracefully with proper disconnect from Graph/Azure
+
 ## 2.0.1
 - Fix activation status detection for roles with pending requests
 
