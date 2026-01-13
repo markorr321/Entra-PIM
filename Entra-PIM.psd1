@@ -6,7 +6,7 @@
     RootModule = 'Entra-PIM.psm1'
 
     # Version number of this module (SemVer format for PSResourceGet)
-    ModuleVersion = '2.0.0'
+    ModuleVersion = '2.0.1'
 
     # ID used to uniquely identify this module
     GUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
@@ -58,6 +58,9 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+## 2.0.1
+- Fix activation status detection for roles with pending requests
+
 ## 2.0.0
 - **MAJOR**: Added Azure Resource role support alongside Entra ID roles
 - Workflow selector to choose between Entra ID and Azure Resource PIM

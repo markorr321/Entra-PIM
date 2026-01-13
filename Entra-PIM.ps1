@@ -1946,8 +1946,20 @@ function Show-PIMGlobalHeader {
                         }
                         $done = $true
                     } elseif ($errorMsg -like "*PendingRoleAssignmentRequest*") {
-                        # Role has a pending activation request in the system - skip it
-                        Write-Host "⚠️ Skipped $roleName - a pending request already exists" -ForegroundColor Yellow
+                        # Role has a pending activation request - check if it's actually active now
+                        try {
+                            $activeCheck = Get-MgRoleManagementDirectoryRoleAssignmentScheduleInstance -Filter "principalId eq '$CurrentUserId' and roleDefinitionId eq '$($role.RoleDefinitionId)'" -ErrorAction SilentlyContinue
+                            if ($activeCheck) {
+                                Write-Host "✅ Role activated: $roleName" -ForegroundColor Green
+                                $successCount++
+                            } else {
+                                Write-Host "❌ Failed to activate: $roleName" -ForegroundColor Red
+                                $failCount++
+                            }
+                        } catch {
+                            Write-Host "❌ Failed to activate: $roleName" -ForegroundColor Red
+                            $failCount++
+                        }
                         $done = $true
                     } elseif ($errorMsg -like "*RoleAssignmentRequestAcrsValidationFailed*" -or $errorMsg -like "*&claims=*") {
                         # Conditional Access requires step-up authentication (ACRS claim)
