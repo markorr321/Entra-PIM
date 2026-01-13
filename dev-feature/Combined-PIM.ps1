@@ -1,3 +1,49 @@
+# ========================= Cross-Platform Keyboard Shortcuts =========================
+# Detect if running on macOS
+$script:IsMacOS = $IsMacOS -or ($PSVersionTable.OS -match 'Darwin')
+
+# Cross-platform shortcut detection
+function Test-QuitShortcut {
+    param([System.ConsoleKeyInfo]$Key)
+
+    if ($script:IsMacOS) {
+        # On macOS: Ctrl+Q may not work, also check for Escape
+        return ($Key.Key -eq 'Q' -and $Key.Modifiers -band [ConsoleModifiers]::Control) -or
+               ($Key.Key -eq 'Escape')
+    } else {
+        # On Windows: Ctrl+Q
+        return ($Key.Key -eq 'Q' -and $Key.Modifiers -eq 'Control')
+    }
+}
+
+function Test-HelpShortcut {
+    param([System.ConsoleKeyInfo]$Key)
+
+    if ($script:IsMacOS) {
+        # On macOS: Ctrl+H sends backspace, so use ?
+        return ($Key.KeyChar -eq '?')
+    } else {
+        # On Windows: Ctrl+H or ?
+        return ($Key.Key -eq 'H' -and $Key.Modifiers -eq 'Control') -or ($Key.KeyChar -eq '?')
+    }
+}
+
+function Get-HelpShortcutText {
+    if ($script:IsMacOS) {
+        return "? Help"
+    } else {
+        return "Ctrl+H Help"
+    }
+}
+
+function Get-QuitShortcutText {
+    if ($script:IsMacOS) {
+        return "ESC Exit"
+    } else {
+        return "Ctrl+Q Exit"
+    }
+}
+
 # ========================= Authentication =========================
 # Global variable to store assembly paths
 $script:MSALAssemblyPaths = @{}
@@ -320,7 +366,7 @@ function Show-YesNoPrompt {
     )
     
     [Console]::CursorVisible = $true
-    $response = Read-PIMInput -Prompt $Question -ControlsText "Y/N to choose | Ctrl+Q Exit"
+    $response = Read-PIMInput -Prompt $Question -ControlsText "Y/N to choose | $(Get-QuitShortcutText)"
     
     if ($response) {
         $userInput = $response.Trim().ToUpper()
@@ -343,7 +389,7 @@ function Show-NoWorkflowsAndWaitForExit {
     [Console]::CursorVisible = $false
     do {
         $key = [Console]::ReadKey($true)
-        if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+        if (Test-QuitShortcut -Key $key) {
             Invoke-PIMExit -Message "Exiting PIM role management..."
         }
     } while ($true)
@@ -520,7 +566,7 @@ function Show-HelpMenu {
     Write-Host ""
     Write-Host "SHORTCUTS" -ForegroundColor Yellow
     Write-Host "  ↑/↓ Navigate   SPACE Toggle   Ctrl+A Select All   ENTER Confirm"
-    Write-Host "  ESC Cancel     Ctrl+Q Exit    Ctrl+H Help"
+    Write-Host "  ESC Cancel     $(Get-QuitShortcutText)    $(Get-HelpShortcutText)"
     Write-Host ""
     Write-Host "WORKFLOWS" -ForegroundColor Yellow
     Write-Host "  Activate Roles     - Request temporary elevated permissions"
@@ -657,7 +703,7 @@ function Show-DynamicExpirationMenu {
             $selectedCount = ($selected | Where-Object { $_ }).Count
             Write-Host "Roles Selected: $selectedCount" -ForegroundColor Green
             Write-Host ""
-            Write-Host "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | Ctrl+H Help | Ctrl+Q Exit" -ForegroundColor Magenta
+            Write-Host "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | $(Get-HelpShortcutText) | $(Get-QuitShortcutText)" -ForegroundColor Magenta
             
             # Handle input with timeout for countdown updates
             $inputAvailable = $false
@@ -775,7 +821,7 @@ function Start-RoleDeactivationWorkflowWithCheck {
                 # Wait for Ctrl+Q to exit
                 do {
                     $key = [Console]::ReadKey($true)
-                    if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+                    if (Test-QuitShortcut -Key $key) {
                         Invoke-PIMExit -Message "Exiting PIM role management..."
                     }
                 } while ($true)
@@ -874,8 +920,8 @@ function Start-RoleDeactivationWorkflowWithCheck {
             } elseif ($userInput -eq "N" -or $userInput -eq "NO") {
                 Write-Host "No additional roles will be managed." -ForegroundColor Red
                 Write-Host "Please close the terminal." -ForegroundColor Yellow
-                Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
-                
+                Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
+
                 # Hide cursor and wait for user to exit with Ctrl+Q
                 [Console]::CursorVisible = $false
                 do {
@@ -951,7 +997,7 @@ function Start-RoleDeactivationWorkflowWithCheck {
             $key = [Console]::ReadKey($true)
             
             # Check for Ctrl+Q
-            if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+            if (Test-QuitShortcut -Key $key) {
                 Invoke-PIMExit
                 return
             }
@@ -1121,13 +1167,13 @@ function Start-RoleDeactivationWorkflowWithCheck {
         Write-Host ""
         Write-Host "Please close the terminal." -ForegroundColor Yellow
         Write-Host ""
-        Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
+        Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
 
         # Hide cursor and wait for Ctrl+Q to exit
         [Console]::CursorVisible = $false
         do {
             $key = [Console]::ReadKey($true)
-            if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+            if (Test-QuitShortcut -Key $key) {
                 Invoke-PIMExit -Message "Exiting PIM role management..."
             }
         } while ($true)
@@ -1191,7 +1237,7 @@ function Start-RoleDeactivationWorkflowWithCheck {
             $key = [Console]::ReadKey($true)
             
             # Check for Ctrl+Q
-            if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+            if (Test-QuitShortcut -Key $key) {
                 Invoke-PIMExit
                 return
             }
@@ -1373,13 +1419,13 @@ function Start-RoleDeactivationWorkflowWithCheck {
         Write-Host ""
         Write-Host "Please close the terminal." -ForegroundColor Yellow
         Write-Host ""
-        Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
+        Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
 
         # Hide cursor and wait for Ctrl+Q to exit
         [Console]::CursorVisible = $false
         do {
             $key = [Console]::ReadKey($true)
-            if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+            if (Test-QuitShortcut -Key $key) {
                 Invoke-PIMExit -Message "Exiting PIM role management..."
             }
         } while ($true)
@@ -1397,12 +1443,14 @@ function Show-PIMGlobalHeader {
     
     # ========================= Centralized Control Menu System =========================
     
-    # Control message constants
+    # Control message constants - dynamically set based on platform
+    $helpText = Get-HelpShortcutText
+    $exitText = Get-QuitShortcutText
     $script:ControlMessages = @{
-        'Exit' = "Ctrl+Q Exit"
-        'Navigation' = "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | Ctrl+H Help | Ctrl+Q Exit"
-        'Input' = "Ctrl+H Help | Ctrl+Q Exit"
-        'Menu' = "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | Ctrl+H Help | Ctrl+Q Exit"
+        'Exit' = $exitText
+        'Navigation' = "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | $helpText | $exitText"
+        'Input' = "$helpText | $exitText"
+        'Menu' = "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | $helpText | $exitText"
         'Shortcuts' = "Ctrl+A Select All | Ctrl+D Deselect All | Ctrl+R Refresh"
     }
     
@@ -1482,7 +1530,7 @@ function Show-PIMGlobalHeader {
             }
 
             # Handle Ctrl+H for help
-            if ($key.Key -eq 'H' -and $key.Modifiers -eq 'Control') {
+            if (Test-HelpShortcut -Key $key) {
                 Show-HelpMenu
                 # Redraw the prompt after help
                 Clear-Host
@@ -1659,7 +1707,7 @@ function Show-PIMGlobalHeader {
             
             # Show control bar below the prompt with proper spacing
             Write-PIMHost "`n"  # Add blank line after prompt
-            Write-PIMHost "Y/N to choose | Ctrl+Q Exit" -ForegroundColor Magenta
+            Write-PIMHost "Y/N to choose | $(Get-QuitShortcutText)" -ForegroundColor Magenta
             $script:LastControlBarLine = [Console]::CursorTop - 1
             
             # Return cursor to inline position after the prompt (same line as Y/N question)
@@ -1670,7 +1718,7 @@ function Show-PIMGlobalHeader {
                 $key = [Console]::ReadKey($true)
                 
                 # Check for Ctrl+Q
-                if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+                if (Test-QuitShortcut -Key $key) {
                     Invoke-PIMExit
                     return
                 }
@@ -1707,7 +1755,7 @@ function Show-PIMGlobalHeader {
                             Write-Host "❌ No role management workflows available." -ForegroundColor Yellow
                             Write-Host ""
                             Write-Host "Check back later when roles are approved or activated." -ForegroundColor White
-                            Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
+                            Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
                             
                             # Hide cursor since no input is needed
                             [Console]::CursorVisible = $false
@@ -1718,7 +1766,7 @@ function Show-PIMGlobalHeader {
                             do {
                                 if ([Console]::KeyAvailable) {
                                     $key = [Console]::ReadKey($true)
-                                    if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+                                    if (Test-QuitShortcut -Key $key) {
                                         Invoke-PIMExit
                                         return
                                     }
@@ -1741,7 +1789,7 @@ function Show-PIMGlobalHeader {
                         Write-Host ""
                         Write-Host "All eligible roles are currently activated." -ForegroundColor Gray
                         Write-Host ""
-                        Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
+                        Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
                         
                         # Hide cursor since no input is needed
                         [Console]::CursorVisible = $false
@@ -1750,7 +1798,7 @@ function Show-PIMGlobalHeader {
                         do {
                             if ([Console]::KeyAvailable) {
                                 $key = [Console]::ReadKey($true)
-                                if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+                                if (Test-QuitShortcut -Key $key) {
                                     Invoke-PIMExit
                                     return
                                 }
@@ -1769,7 +1817,7 @@ function Show-PIMGlobalHeader {
                             } catch { }
                         }
                         Write-Host ""
-                        Write-Host "Y/N to choose | Ctrl+Q Exit" -ForegroundColor Magenta
+                        Write-Host "Y/N to choose | $(Get-QuitShortcutText)" -ForegroundColor Magenta
                         $script:LastControlBarLine = [Console]::CursorTop - 1
                         # Return cursor to prompt position
                         [Console]::SetCursorPosition([Console]::CursorLeft, [Console]::CursorTop - 2)
@@ -1993,7 +2041,7 @@ function Show-PIMGlobalHeader {
             Write-Host ""
             Write-Host "Please close the terminal." -ForegroundColor Yellow
             Write-Host ""
-            Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
+            Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
 
             # Hide cursor and wait for user to exit with Ctrl+Q
             [Console]::CursorVisible = $false
@@ -2584,7 +2632,7 @@ function Show-PIMGlobalHeader {
             # Check if user pressed a key to skip
             if ([Console]::KeyAvailable) {
                 $key = [Console]::ReadKey($true)
-                if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+                if (Test-QuitShortcut -Key $key) {
                     Invoke-PIMExit
                 } else {
                 Write-Host "Countdown skipped by user." -ForegroundColor Yellow
@@ -2683,11 +2731,11 @@ function Show-PIMGlobalHeader {
                 
                 # Show control bar for role selection step
                 if ($currentStep -eq 0) {
-                    Write-Host "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | Ctrl+H Help | Ctrl+Q Exit" -ForegroundColor Magenta
+                    Write-Host "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | $(Get-HelpShortcutText) | $(Get-QuitShortcutText)" -ForegroundColor Magenta
                 } elseif ($currentStep -eq 1) {
-                    Write-Host "Type duration | ENTER Continue | Ctrl+Q Exit" -ForegroundColor Magenta
+                    Write-Host "Type duration | ENTER Continue | $(Get-QuitShortcutText)" -ForegroundColor Magenta
                 } elseif ($currentStep -eq 2) {
-                    Write-Host "Type reason | ENTER Activate | Ctrl+Q Exit" -ForegroundColor Magenta
+                    Write-Host "Type reason | ENTER Activate | $(Get-QuitShortcutText)" -ForegroundColor Magenta
                 }
                 
                 $key = [Console]::ReadKey($true)
@@ -2721,34 +2769,34 @@ function Show-PIMGlobalHeader {
                             if ($selectedIndices.Count -eq 0) {
                                 Write-Host ""
                                 Write-Host "❌ Please select at least one role." -ForegroundColor Red
-                                Show-DynamicControlBar -ControlsText "↑↓ Navigate Roles | SPACE Toggle | Select roles first | Ctrl+Q Exit"
+                                Show-DynamicControlBar -ControlsText "↑↓ Navigate Roles | SPACE Toggle | Select roles first | $(Get-QuitShortcutText)"
                                 Start-Sleep -Seconds 2
                                 continue
                             }
                             
                             $currentStep = 1  # Move to duration input
                             [Console]::CursorVisible = $true
-                            Show-DynamicControlBar -ControlsText "Type duration | ENTER Continue to Reason | Ctrl+Q Exit"
+                            Show-DynamicControlBar -ControlsText "Type duration | ENTER Continue to Reason | $(Get-QuitShortcutText)"
                             
                         } elseif ($currentStep -eq 1) {
                             # Step 1: Duration -> Reason
                             if ([string]::IsNullOrWhiteSpace($durationInput)) {
                                 Write-Host ""
                                 Write-Host "❌ Please enter a duration." -ForegroundColor Red
-                                Show-DynamicControlBar -ControlsText "Type duration | ENTER Continue to Reason | Ctrl+Q Exit"
+                                Show-DynamicControlBar -ControlsText "Type duration | ENTER Continue to Reason | $(Get-QuitShortcutText)"
                                 Start-Sleep -Seconds 2
                                 continue
                             }
                             
                             $currentStep = 2  # Move to reason input
-                            Show-DynamicControlBar -ControlsText "Type reason | ENTER Activate Roles | Ctrl+Q Exit"
+                            Show-DynamicControlBar -ControlsText "Type reason | ENTER Activate Roles | $(Get-QuitShortcutText)"
                             
                         } elseif ($currentStep -eq 2) {
                             # Step 2: Reason -> Submit
                             if ([string]::IsNullOrWhiteSpace($justificationInput)) {
                                 Write-Host ""
                                 Write-Host "❌ Please enter a reason." -ForegroundColor Red
-                                Show-DynamicControlBar -ControlsText "Type reason | ENTER Activate Roles | Ctrl+Q Exit"
+                                Show-DynamicControlBar -ControlsText "Type reason | ENTER Activate Roles | $(Get-QuitShortcutText)"
                                 Start-Sleep -Seconds 2
                                 continue
                             }
@@ -2772,11 +2820,11 @@ function Show-PIMGlobalHeader {
                         if ($currentStep -eq 1 -and $durationInput.Length -gt 0) {
                             $durationInput = $durationInput.Substring(0, $durationInput.Length - 1)
                             # Update control bar after backspace
-                            Show-DynamicControlBar -ControlsText "Type duration | ENTER Continue to Reason | Ctrl+Q Exit"
+                            Show-DynamicControlBar -ControlsText "Type duration | ENTER Continue to Reason | $(Get-QuitShortcutText)"
                         } elseif ($currentStep -eq 2 -and $justificationInput.Length -gt 0) {
                             $justificationInput = $justificationInput.Substring(0, $justificationInput.Length - 1)
                             # Update control bar after backspace
-                            Show-DynamicControlBar -ControlsText "Type reason | ENTER Activate Roles | Ctrl+Q Exit"
+                            Show-DynamicControlBar -ControlsText "Type reason | ENTER Activate Roles | $(Get-QuitShortcutText)"
                         }
                     }
                     default {
@@ -2785,11 +2833,11 @@ function Show-PIMGlobalHeader {
                             if ($currentStep -eq 1) {
                                 $durationInput += $key.KeyChar
                                 # Update control bar after each character
-                                Show-DynamicControlBar -ControlsText "Type duration | ENTER Continue to Reason | Ctrl+Q Exit"
+                                Show-DynamicControlBar -ControlsText "Type duration | ENTER Continue to Reason | $(Get-QuitShortcutText)"
                             } elseif ($currentStep -eq 2) {
                                 $justificationInput += $key.KeyChar
                                 # Update control bar after each character
-                                Show-DynamicControlBar -ControlsText "Type reason | ENTER Activate Roles | Ctrl+Q Exit"
+                                Show-DynamicControlBar -ControlsText "Type reason | ENTER Activate Roles | $(Get-QuitShortcutText)"
                             }
                         }
                     }
@@ -2932,9 +2980,9 @@ function Show-PIMGlobalHeader {
                 # Show control bar for navigation (different for single vs multi-selection)
                 $controlBarTop = [Console]::CursorTop
                 if ($SingleSelection) {
-                    Write-Host "↑/↓ Navigate | SPACE Select | ENTER Confirm | Ctrl+H Help | Ctrl+Q Exit" -ForegroundColor Magenta
+                    Write-Host "↑/↓ Navigate | SPACE Select | ENTER Confirm | $(Get-HelpShortcutText) | $(Get-QuitShortcutText)" -ForegroundColor Magenta
                 } else {
-                    Write-Host "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | Ctrl+H Help | Ctrl+Q Exit" -ForegroundColor Magenta
+                    Write-Host "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | $(Get-HelpShortcutText) | $(Get-QuitShortcutText)" -ForegroundColor Magenta
                 }
                 
                 # Get user input
@@ -3145,7 +3193,7 @@ function Show-PIMGlobalHeader {
                     [Console]::CursorVisible = $false
                     do {
                         $key = [Console]::ReadKey($true)
-                        if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+                        if (Test-QuitShortcut -Key $key) {
                             Invoke-PIMExit -Message "Exiting PIM role management..."
                         }
                     } while ($true)
@@ -3297,7 +3345,7 @@ function Start-RoleDeactivationWorkflow {
             $key = [Console]::ReadKey($true)
             
             # Check for Ctrl+Q
-            if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+            if (Test-QuitShortcut -Key $key) {
                 Invoke-PIMExit
                 return
             }
@@ -3363,7 +3411,7 @@ function Start-RoleDeactivationWorkflow {
                     [Console]::CursorVisible = $false
                     do {
                         $key = [Console]::ReadKey($true)
-                        if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+                        if (Test-QuitShortcut -Key $key) {
                             Invoke-PIMExit -Message "Exiting PIM role management..."
                         }
                     } while ($true)
@@ -3607,7 +3655,7 @@ function Start-RoleDeactivationWorkflow {
             Write-Host ""
             Write-Host "Please close the terminal." -ForegroundColor Yellow
             Write-Host ""
-            Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
+            Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
 
             # Hide cursor and wait for user to exit with Ctrl+Q
             [Console]::CursorVisible = $false
@@ -4051,15 +4099,15 @@ function Show-AzureCheckboxMenu {
             Write-Host ""
 
             if ($SingleSelection) {
-                Write-Host "↑/↓ Navigate | SPACE Select | ENTER Confirm | Ctrl+H Help | Ctrl+Q Exit" -ForegroundColor Magenta
+                Write-Host "↑/↓ Navigate | SPACE Select | ENTER Confirm | $(Get-HelpShortcutText) | $(Get-QuitShortcutText)" -ForegroundColor Magenta
             } else {
-                Write-Host "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | Ctrl+H Help | Ctrl+Q Exit" -ForegroundColor Magenta
+                Write-Host "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | $(Get-HelpShortcutText) | $(Get-QuitShortcutText)" -ForegroundColor Magenta
             }
 
             $key = [Console]::ReadKey($true)
 
             # Handle Ctrl+Q to exit
-            if ($key.Modifiers -band [ConsoleModifiers]::Control -and $key.Key -eq 'Q') {
+            if (Test-QuitShortcut -Key $key) {
                 Invoke-AzurePIMExit
             }
 
@@ -4073,7 +4121,7 @@ function Show-AzureCheckboxMenu {
             }
 
             # Handle Ctrl+H for help
-            if ($key.Modifiers -band [ConsoleModifiers]::Control -and $key.Key -eq 'H') {
+            if (Test-HelpShortcut -Key $key) {
                 Show-HelpMenu
                 continue
             }
@@ -4208,7 +4256,7 @@ function Start-AzureRoleActivationWorkflow {
 
             # Show control bar below the prompt with proper spacing
             Write-Host "`n"  # Add blank line after prompt
-            Write-Host "Y/N to choose | Ctrl+Q Exit" -ForegroundColor Magenta
+            Write-Host "Y/N to choose | $(Get-QuitShortcutText)" -ForegroundColor Magenta
 
             # Return cursor to inline position after the prompt (same line as Y/N question)
             [Console]::SetCursorPosition($promptLeft, $promptTop)
@@ -4218,7 +4266,7 @@ function Start-AzureRoleActivationWorkflow {
                 $key = [Console]::ReadKey($true)
 
                 # Check for Ctrl+Q
-                if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+                if (Test-QuitShortcut -Key $key) {
                     Invoke-AzurePIMExit
                     return
                 }
@@ -4237,12 +4285,12 @@ function Start-AzureRoleActivationWorkflow {
                         Write-Host ""
                         Write-Host "Check back later when roles are approved or activated." -ForegroundColor Gray
                         Write-Host ""
-                        Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
+                        Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
 
                         [Console]::CursorVisible = $false
                         do {
                             $k = [Console]::ReadKey($true)
-                            if ($k.Modifiers -band [ConsoleModifiers]::Control -and $k.Key -eq 'Q') {
+                            if (Test-QuitShortcut -Key $k) {
                                 Invoke-AzurePIMExit
                             }
                         } while ($true)
@@ -4254,7 +4302,7 @@ function Start-AzureRoleActivationWorkflow {
                         $promptLeft = [Console]::CursorLeft
                         $promptTop = [Console]::CursorTop
                         Write-Host "`n"
-                        Write-Host "Y/N to choose | Ctrl+Q Exit" -ForegroundColor Magenta
+                        Write-Host "Y/N to choose | $(Get-QuitShortcutText)" -ForegroundColor Magenta
                         [Console]::SetCursorPosition($promptLeft, $promptTop)
                         $userInput = ""
                     }
@@ -4275,12 +4323,12 @@ function Start-AzureRoleActivationWorkflow {
             Write-Host ""
             Write-Host "Check back later when roles are approved or activated." -ForegroundColor Gray
             Write-Host ""
-            Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
+            Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
 
             # Wait for Ctrl+Q to exit
             do {
                 $key = [Console]::ReadKey($true)
-                if ($key.Modifiers -band [ConsoleModifiers]::Control -and $key.Key -eq 'Q') {
+                if (Test-QuitShortcut -Key $key) {
                     Invoke-AzurePIMExit
                 }
             } while ($true)
@@ -4316,7 +4364,7 @@ function Start-AzureRoleDeactivationWorkflow {
 
             # Show control bar below the prompt with proper spacing
             Write-Host "`n"  # Add blank line after prompt
-            Write-Host "Y/N to choose | Ctrl+Q Exit" -ForegroundColor Magenta
+            Write-Host "Y/N to choose | $(Get-QuitShortcutText)" -ForegroundColor Magenta
 
             # Return cursor to inline position after the prompt (same line as Y/N question)
             [Console]::SetCursorPosition($promptLeft, $promptTop)
@@ -4326,7 +4374,7 @@ function Start-AzureRoleDeactivationWorkflow {
                 $key = [Console]::ReadKey($true)
 
                 # Check for Ctrl+Q
-                if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+                if (Test-QuitShortcut -Key $key) {
                     Invoke-AzurePIMExit
                     return
                 }
@@ -4345,12 +4393,12 @@ function Start-AzureRoleDeactivationWorkflow {
                         Write-Host ""
                         Write-Host "Check back later when roles are approved or activated." -ForegroundColor Gray
                         Write-Host ""
-                        Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
+                        Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
 
                         [Console]::CursorVisible = $false
                         do {
                             $k = [Console]::ReadKey($true)
-                            if ($k.Modifiers -band [ConsoleModifiers]::Control -and $k.Key -eq 'Q') {
+                            if (Test-QuitShortcut -Key $k) {
                                 Invoke-AzurePIMExit
                             }
                         } while ($true)
@@ -4362,7 +4410,7 @@ function Start-AzureRoleDeactivationWorkflow {
                         $promptLeft = [Console]::CursorLeft
                         $promptTop = [Console]::CursorTop
                         Write-Host "`n"
-                        Write-Host "Y/N to choose | Ctrl+Q Exit" -ForegroundColor Magenta
+                        Write-Host "Y/N to choose | $(Get-QuitShortcutText)" -ForegroundColor Magenta
                         [Console]::SetCursorPosition($promptLeft, $promptTop)
                         $userInput = ""
                     }
@@ -4383,12 +4431,12 @@ function Start-AzureRoleDeactivationWorkflow {
             Write-Host ""
             Write-Host "Check back later when roles are approved or activated." -ForegroundColor Gray
             Write-Host ""
-            Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
+            Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
 
             # Wait for Ctrl+Q to exit
             do {
                 $key = [Console]::ReadKey($true)
-                if ($key.Modifiers -band [ConsoleModifiers]::Control -and $key.Key -eq 'Q') {
+                if (Test-QuitShortcut -Key $key) {
                     Invoke-AzurePIMExit
                 }
             } while ($true)
@@ -4507,7 +4555,7 @@ function Show-AzureDeactivationCountdown {
             # Check if user pressed a key
             if ([Console]::KeyAvailable) {
                 $key = [Console]::ReadKey($true)
-                if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+                if (Test-QuitShortcut -Key $key) {
                     Invoke-AzurePIMExit
                 }
             }
@@ -4664,14 +4712,14 @@ function Start-AzureRoleDeactivation {
         Write-Host ""
         Write-Host "Please close the terminal." -ForegroundColor Yellow
         Write-Host ""
-        Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
+        Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
 
         # Hide cursor and wait for user to exit with Ctrl+Q
         [Console]::CursorVisible = $false
         do {
             if ([Console]::KeyAvailable) {
                 $key = [Console]::ReadKey($true)
-                if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+                if (Test-QuitShortcut -Key $key) {
                     Invoke-AzurePIMExit
                     return
                 }
@@ -4780,14 +4828,14 @@ function Show-AzureActivationWizard {
         Write-Host ""
         Write-Host "Please close the terminal." -ForegroundColor Yellow
         Write-Host ""
-        Write-Host "Ctrl+Q Exit" -ForegroundColor Magenta
+        Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
 
         # Hide cursor and wait for user to exit with Ctrl+Q
         [Console]::CursorVisible = $false
         do {
             if ([Console]::KeyAvailable) {
                 $key = [Console]::ReadKey($true)
-                if ($key.Key -eq 'Q' -and $key.Modifiers -eq 'Control') {
+                if (Test-QuitShortcut -Key $key) {
                     Invoke-AzurePIMExit
                     return
                 }
