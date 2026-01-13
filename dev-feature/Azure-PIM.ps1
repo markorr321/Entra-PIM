@@ -1006,10 +1006,18 @@ try {
     # Get subscriptions from current context (already authenticated)
     Write-Host ""
     
-    # Get all subscriptions for selection
-    $subscriptions = Get-AzSubscription -ErrorAction SilentlyContinue
+    # Get all subscriptions for selection - include tenant ID to ensure we get all
+    $context = Get-AzContext
+    $subscriptions = Get-AzSubscription -TenantId $context.Tenant.Id -ErrorAction SilentlyContinue
+    
+    # If still no subscriptions, try without tenant filter
+    if (-not $subscriptions -or $subscriptions.Count -eq 0) {
+        $subscriptions = Get-AzSubscription -ErrorAction SilentlyContinue
+    }
+    
     if (-not $subscriptions -or $subscriptions.Count -eq 0) {
         Write-Status "No subscriptions found" -Type "Error"
+        Write-Host "   Make sure you have Reader or higher access to at least one subscription" -ForegroundColor Gray
         exit 1
     }
     

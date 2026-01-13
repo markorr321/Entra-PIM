@@ -430,9 +430,24 @@ function Get-CachedScheduleInstances {
     param([string]$CurrentUserId)
     
     # ALWAYS fetch fresh data for deactivation - no caching
+    # Use REST API for faster response
     try {
-        $scheduleInstances = Get-MgRoleManagementDirectoryRoleAssignmentScheduleInstance -Filter "PrincipalId eq '$CurrentUserId' and AssignmentType eq 'Activated'" -All
-        return $scheduleInstances
+        $uri = "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignmentScheduleInstances?`$filter=principalId eq '$CurrentUserId' and assignmentType eq 'Activated'&`$select=id,roleDefinitionId,principalId,directoryScopeId,startDateTime,endDateTime"
+        $response = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
+        if ($response -and $response.value) {
+            # Return objects with proper property names for compatibility
+            return $response.value | ForEach-Object {
+                [PSCustomObject]@{
+                    Id = $_.id
+                    RoleDefinitionId = $_.roleDefinitionId
+                    PrincipalId = $_.principalId
+                    DirectoryScopeId = $_.directoryScopeId
+                    StartDateTime = $_.startDateTime
+                    EndDateTime = $_.endDateTime
+                }
+            }
+        }
+        return @()
     } catch {
         return @()
     }
@@ -444,21 +459,30 @@ function Get-ActiveRolesOptimized {
     
     $activeRoles = @()
     try {
-        # Fresh API call - no cache
-        $scheduleInstances = Get-MgRoleManagementDirectoryRoleAssignmentScheduleInstance -Filter "PrincipalId eq '$CurrentUserId' and AssignmentType eq 'Activated'" -All
+        # Use REST API for faster response - include all fields needed for deactivation
+        $uri = "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignmentScheduleInstances?`$filter=principalId eq '$CurrentUserId' and assignmentType eq 'Activated'&`$select=id,roleDefinitionId,principalId,directoryScopeId,startDateTime,endDateTime"
+        $response = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
+        $scheduleInstances = if ($response -and $response.value) { $response.value } else { @() }
         
         # Use pre-loaded role definition cache for instant lookup
         foreach ($instance in $scheduleInstances) {
-            $roleDefinition = Get-CachedRoleDefinition -RoleId $instance.RoleDefinitionId
+            $roleDefinition = Get-CachedRoleDefinition -RoleId $instance.roleDefinitionId
             if ($roleDefinition) {
                 $expirationTime = $null
-                if ($instance.EndDateTime) {
-                    $expirationTime = [DateTime]::Parse($instance.EndDateTime).ToLocalTime()
+                if ($instance.endDateTime) {
+                    $expirationTime = [DateTime]::Parse($instance.endDateTime).ToLocalTime()
                 }
                 
                 $activeRoles += [PSCustomObject]@{
                     RoleName = $roleDefinition.DisplayName
-                    Assignment = $instance
+                    Assignment = [PSCustomObject]@{
+                        Id = $instance.id
+                        RoleDefinitionId = $instance.roleDefinitionId
+                        PrincipalId = $instance.principalId
+                        DirectoryScopeId = $instance.directoryScopeId
+                        StartDateTime = $instance.startDateTime
+                        EndDateTime = $instance.endDateTime
+                    }
                     ExpirationTime = $expirationTime
                 }
             }
@@ -482,51 +506,69 @@ function Get-EligibleRolesOptimized {
     $pendingRoleIds = @()
     
     try {
-        # OPTIMIZED: Sequential API calls (ThreadJob doesn't share Graph context)
-        # But role definition lookups are instant from cache
-        $eligibilitySchedules = Get-MgRoleManagementDirectoryRoleEligibilityScheduleInstance -Filter "PrincipalId eq '$CurrentUserId'" -All
-        $activatedAssignments = Get-MgRoleManagementDirectoryRoleAssignmentScheduleInstance -Filter "PrincipalId eq '$CurrentUserId' and AssignmentType eq 'Activated'" -All -ErrorAction SilentlyContinue
-        $allRequests = Get-MgRoleManagementDirectoryRoleAssignmentScheduleRequest -Filter "PrincipalId eq '$CurrentUserId'" -Top 100 -ErrorAction SilentlyContinue
+        # Sequential API calls with timing
+        $swTotal = [System.Diagnostics.Stopwatch]::StartNew()
         
-        # Process eligibility schedules with cached role definitions (instant lookup)
+        $sw1 = [System.Diagnostics.Stopwatch]::StartNew()
+        $eligibilityResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleEligibilityScheduleInstances?`$filter=principalId eq '$CurrentUserId'&`$select=roleDefinitionId,principalId,directoryScopeId" -ErrorAction Stop
+        $eligibilitySchedules = if ($eligibilityResponse -and $eligibilityResponse.value) { $eligibilityResponse.value } else { @() }
+        $sw1.Stop()
+        Write-Host " [E:$($sw1.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
+        
+        $sw2 = [System.Diagnostics.Stopwatch]::StartNew()
+        try {
+            $activeResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignmentScheduleInstances?`$filter=principalId eq '$CurrentUserId' and assignmentType eq 'Activated'&`$select=roleDefinitionId,endDateTime" -ErrorAction Stop
+            $activatedAssignments = if ($activeResponse -and $activeResponse.value) { $activeResponse.value } else { @() }
+        } catch { $activatedAssignments = @() }
+        $sw2.Stop()
+        Write-Host " [A:$($sw2.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
+        
+        $sw3 = [System.Diagnostics.Stopwatch]::StartNew()
+        try {
+            $pendingResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignmentScheduleRequests?`$filter=principalId eq '$CurrentUserId' and status eq 'PendingApproval'&`$select=roleDefinitionId" -ErrorAction Stop
+        } catch { $pendingResponse = $null }
+        $sw3.Stop()
+        Write-Host " [P:$($sw3.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
+        
+        # Process eligibility schedules with cached role definitions
+        $sw4 = [System.Diagnostics.Stopwatch]::StartNew()
         foreach ($schedule in $eligibilitySchedules) {
-            $roleDef = Get-CachedRoleDefinition -RoleId $schedule.RoleDefinitionId
+            $roleDef = Get-CachedRoleDefinition -RoleId $schedule.roleDefinitionId
             if ($roleDef) {
                 $allEligibleRoles += [PSCustomObject]@{
-                    RoleDefinitionId = $schedule.RoleDefinitionId
+                    RoleDefinitionId = $schedule.roleDefinitionId
                     RoleDefinition   = @{
                         DisplayName = $roleDef.DisplayName
                         Id = $roleDef.Id
                         Description = $roleDef.Description
                     }
-                    PrincipalId      = $schedule.PrincipalId
-                    DirectoryScopeId = $schedule.DirectoryScopeId
+                    PrincipalId      = $schedule.principalId
+                    DirectoryScopeId = $schedule.directoryScopeId
                 }
             }
         }
+        $sw4.Stop()
+        Write-Host " [C:$($sw4.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
         
         # Process active assignments
-        if ($activatedAssignments) {
+        $activeRoleIds = @()
+        if ($activatedAssignments -and $activatedAssignments.Count -gt 0) {
             $currentTime = Get-Date
             $activeRoleIds = $activatedAssignments | Where-Object {
-                $null -ne $_.EndDateTime -and $_.EndDateTime -gt $currentTime
-            } | Select-Object -ExpandProperty RoleDefinitionId -Unique
+                $null -ne $_.endDateTime -and [DateTime]::Parse($_.endDateTime) -gt $currentTime
+            } | Select-Object -ExpandProperty roleDefinitionId -Unique
         }
         
-        # Process pending requests - use REST API to get PendingApproval requests
-        # The PowerShell cmdlet doesn't reliably return PendingApproval status
-        try {
-            $pendingResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignmentScheduleRequests?`$filter=status eq 'PendingApproval'" -ErrorAction SilentlyContinue
-            if ($pendingResponse -and $pendingResponse.value) {
-                $pendingRoleIds = @($pendingResponse.value | Where-Object { $_.principalId -eq $CurrentUserId } | Select-Object -ExpandProperty roleDefinitionId -Unique)
-            } else {
-                $pendingRoleIds = @()
-            }
-        } catch {
-            $pendingRoleIds = @()
+        # Process pending requests
+        $pendingRoleIds = @()
+        if ($pendingResponse -and $pendingResponse.value) {
+            $pendingRoleIds = @($pendingResponse.value | Select-Object -ExpandProperty roleDefinitionId -Unique)
         }
+        
+        $swTotal.Stop()
+        Write-Host " [T:$($swTotal.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray
     } catch {
-        Write-Host "Error retrieving roles: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host " Err: $($_.Exception.Message)" -ForegroundColor Red
         $allEligibleRoles = @()
     }
     
@@ -1457,16 +1499,15 @@ function Show-PIMGlobalHeader {
             Write-Host "ℹ️ Already disconnected from Microsoft Graph." -ForegroundColor DarkGray
         }
 
-        if ($script:IsRunningOnMac) {
-            Write-Host ""
-            Write-Host "Closing terminal in 2 seconds..." -ForegroundColor Yellow
-            Start-Sleep -Seconds 2
-            & osascript -e 'tell application "Terminal" to close first window' 2>$null
-        } else {
-            Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
-            Start-Sleep -Seconds 2
-            [Environment]::Exit(0)
+        Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 2
+        
+        # Kill the entire process tree (current + parent)
+        $parentId = (Get-Process -Id $PID).Parent.Id
+        if ($parentId) {
+            Stop-Process -Id $parentId -Force -ErrorAction SilentlyContinue
         }
+        Stop-Process -Id $PID -Force
     }
 
     # Centralized key handler for common shortcuts
@@ -1497,22 +1538,10 @@ function Show-PIMGlobalHeader {
         # Show cursor for input
         [Console]::CursorVisible = $true
         
-        # Display prompt with colon and space, keep cursor inline
+        # Display prompt inline with cursor right after colon
         Write-Host "${Prompt}: " -ForegroundColor Cyan -NoNewline
         
-        # Store cursor position for inline input
-        $promptLeft = [Console]::CursorLeft
-        $promptTop = [Console]::CursorTop
-        
-        # Show control bar below the prompt
-        Write-Host ""  # Move to next line
-        Write-Host ""  # Add extra space
-        Write-Host $ControlsText -ForegroundColor Magenta
-        $script:LastControlBarLine = [Console]::CursorTop - 1
-        
-        # Return cursor to inline position after the prompt
-        [Console]::SetCursorPosition($promptLeft, $promptTop)
-        
+        # Cursor is now right after ": ", ready for input
         $userInput = ""
         do {
             $key = [Console]::ReadKey($true)
@@ -1535,13 +1564,6 @@ function Show-PIMGlobalHeader {
                 Write-Host ""
                 Write-Host "${Prompt}: " -ForegroundColor Cyan -NoNewline
                 Write-Host $userInput -NoNewline -ForegroundColor White
-                $promptLeft = [Console]::CursorLeft
-                $promptTop = [Console]::CursorTop
-                Write-Host ""
-                Write-Host ""
-                Write-Host $ControlsText -ForegroundColor Magenta
-                $script:LastControlBarLine = [Console]::CursorTop - 1
-                [Console]::SetCursorPosition($promptLeft, $promptTop)
                 continue
             }
 
@@ -1553,23 +1575,7 @@ function Show-PIMGlobalHeader {
             
             # Handle Enter
             if ($key.Key -eq 'Enter') {
-                # Store current position (after user input on prompt line)
-                $inputEndTop = $promptTop + 1
-                
-                # Clear the control bar and any leftover content below it
-                if ($script:LastControlBarLine -ge 0) {
-                    try {
-                        # Clear control bar line and several lines below to remove stale content
-                        for ($clearLine = $script:LastControlBarLine; $clearLine -lt [Math]::Min($script:LastControlBarLine + 5, [Console]::BufferHeight); $clearLine++) {
-                            [Console]::SetCursorPosition(0, $clearLine)
-                            Write-Host (" " * [Console]::WindowWidth) -NoNewline
-                        }
-                        $script:LastControlBarLine = -1
-                    } catch { }
-                }
-                
-                # Move cursor to line after the prompt for subsequent output
-                [Console]::SetCursorPosition(0, $inputEndTop)
+                Write-Host ""  # Move to next line after input
                 break
             }
             
@@ -3996,10 +4002,64 @@ function Start-AzurePIMWorkflow {
         Write-Host "✅ Successfully connected to Azure" -ForegroundColor Green
         Write-Host "✅ Account: $($context.Account.Id)" -ForegroundColor Green
 
-        # Get subscriptions
-        $subscriptions = @(Get-AzSubscription -ErrorAction SilentlyContinue)
+        # First, try to get PIM eligible roles directly (works even without subscription access)
+        Write-Host "🔄 Checking for PIM eligible roles..." -ForegroundColor Cyan
+        
+        # Use the original access token from MSAL (already has management.azure.com scope)
+        $headers = @{ Authorization = "Bearer $accessToken" }
+        
+        # Get eligible role assignments across all scopes the user can see
+        $pimEligibleRoles = @()
+        try {
+            # Query at root scope to find all eligible assignments
+            $uri = "https://management.azure.com/providers/Microsoft.Authorization/roleEligibilityScheduleInstances?api-version=2020-10-01&`$filter=asTarget()"
+            $response = Invoke-RestMethod -Uri $uri -Headers $headers -Method GET -ErrorAction SilentlyContinue
+            if ($response.value) {
+                $pimEligibleRoles = $response.value
+            }
+        } catch {
+            # If root scope fails, that's okay - we'll try subscriptions next
+        }
+        
+        if ($pimEligibleRoles.Count -gt 0) {
+            Write-Host "✅ Found $($pimEligibleRoles.Count) PIM eligible role(s)" -ForegroundColor Green
+            
+            # Extract unique subscriptions from PIM roles
+            $pimSubscriptionIds = $pimEligibleRoles | ForEach-Object {
+                if ($_.properties.scope -match '/subscriptions/([^/]+)') {
+                    $matches[1]
+                }
+            } | Where-Object { $_ } | Select-Object -Unique
+            
+            # Create subscription objects for selection
+            $subscriptions = @()
+            foreach ($subId in $pimSubscriptionIds) {
+                $subName = $pimEligibleRoles | Where-Object { $_.properties.scope -match $subId } | 
+                    Select-Object -First 1 -ExpandProperty properties | 
+                    Select-Object -ExpandProperty expandedProperties | 
+                    Select-Object -ExpandProperty scope | 
+                    Select-Object -ExpandProperty displayName
+                
+                if (-not $subName) { $subName = $subId }
+                
+                $subscriptions += [PSCustomObject]@{
+                    Name = $subName
+                    Id = $subId
+                }
+            }
+        } else {
+            # Fallback: Get subscriptions - include tenant ID to ensure we get all
+            $subscriptions = @(Get-AzSubscription -TenantId $tenantId -ErrorAction SilentlyContinue)
+            
+            # If still no subscriptions, try without tenant filter
+            if ($subscriptions.Count -eq 0) {
+                $subscriptions = @(Get-AzSubscription -ErrorAction SilentlyContinue)
+            }
+        }
+        
         if ($subscriptions.Count -eq 0) {
-            Write-Host "❌ No subscriptions found" -ForegroundColor Red
+            Write-Host "❌ No subscriptions or PIM eligible roles found" -ForegroundColor Red
+            Write-Host "   Make sure you have Reader access or PIM eligible roles" -ForegroundColor Gray
             Write-Host "Press any key to continue..." -ForegroundColor Gray
             [Console]::ReadKey($true) | Out-Null
             return
@@ -4059,16 +4119,15 @@ function Invoke-AzurePIMExit {
         Write-Host "ℹ️ Already disconnected from Azure." -ForegroundColor DarkGray
     }
 
-    if ($script:IsRunningOnMac) {
-        Write-Host ""
-        Write-Host "Closing terminal in 2 seconds..." -ForegroundColor Yellow
-        Start-Sleep -Seconds 2
-        & osascript -e 'tell application "Terminal" to close first window' 2>$null
-    } else {
-        Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
-        Start-Sleep -Seconds 2
-        [Environment]::Exit(0)
+    Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 2
+    
+    # Kill the entire process tree (current + parent)
+    $parentId = (Get-Process -Id $PID).Parent.Id
+    if ($parentId) {
+        Stop-Process -Id $parentId -Force -ErrorAction SilentlyContinue
     }
+    Stop-Process -Id $PID -Force
 }
 
 function Show-AzureCheckboxMenu {
@@ -5047,39 +5106,33 @@ function Invoke-GracefulExit {
         }
     } catch { }
 
-    if ($script:IsRunningOnMac) {
-        Write-Host ""
-        Write-Host "Closing terminal in 2 seconds..." -ForegroundColor Yellow
-        Start-Sleep -Seconds 2
-        & osascript -e 'tell application "Terminal" to close first window' 2>$null
-    } else {
-        Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
-        Start-Sleep -Seconds 2
-        [Environment]::Exit(0)
+    Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
+    Start-Sleep -Seconds 2
+    
+    # Kill the entire process tree (current + parent)
+    $parentId = (Get-Process -Id $PID).Parent.Id
+    if ($parentId) {
+        Stop-Process -Id $parentId -Force -ErrorAction SilentlyContinue
     }
+    Stop-Process -Id $PID -Force
 }
 
 # Install prerequisites before starting
 Install-Prerequisites
 
-# Main loop with Ctrl+C handling
-try {
-    do {
-        $workflow = Show-WorkflowSelector
+# Main loop - no try/finally needed since exit functions handle cleanup
+do {
+    $workflow = Show-WorkflowSelector
 
-        switch ($workflow) {
-            'Entra' {
-                Start-EntraPIMWorkflow
-            }
-            'Azure' {
-                Start-AzurePIMWorkflow
-            }
-            'Quit' {
-                Invoke-GracefulExit -Reason "Exiting..."
-            }
+    switch ($workflow) {
+        'Entra' {
+            Start-EntraPIMWorkflow
         }
-    } while ($true)
-} finally {
-    # Handle Ctrl+C or any unexpected termination
-    Invoke-GracefulExit -Reason "Interrupted - cleaning up..."
-}
+        'Azure' {
+            Start-AzurePIMWorkflow
+        }
+        'Quit' {
+            Invoke-GracefulExit -Reason "Exiting..."
+        }
+    }
+} while ($true)
