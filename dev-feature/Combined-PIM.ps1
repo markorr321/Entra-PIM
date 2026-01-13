@@ -1461,15 +1461,14 @@ function Show-PIMGlobalHeader {
             Write-Host ""
             Write-Host "Closing terminal in 2 seconds..." -ForegroundColor Yellow
             Start-Sleep -Seconds 2
-            # Use AppleScript to close the Terminal window on macOS
             & osascript -e 'tell application "Terminal" to close first window' 2>$null
         } else {
             Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
             Start-Sleep -Seconds 2
+            [Environment]::Exit(0)
         }
-        exit 0
     }
-    
+
     # Centralized key handler for common shortcuts
     function Test-GlobalShortcut {
         param(
@@ -4050,12 +4049,14 @@ function Invoke-AzurePIMExit {
 
     if ($script:IsRunningOnMac) {
         Write-Host ""
-        Read-Host "Press ENTER to exit"
+        Write-Host "Closing terminal in 2 seconds..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 2
+        & osascript -e 'tell application "Terminal" to close first window' 2>$null
     } else {
         Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
         Start-Sleep -Seconds 2
+        [Environment]::Exit(0)
     }
-    exit 0
 }
 
 function Show-AzureCheckboxMenu {
@@ -4941,12 +4942,6 @@ function Start-EntraPIMWorkflow {
 
 # ========================= Prerequisites Installation =========================
 function Install-Prerequisites {
-    Write-Host ""
-    Write-Host "=====================================" -ForegroundColor Cyan
-    Write-Host "  Checking Prerequisites" -ForegroundColor Cyan
-    Write-Host "=====================================" -ForegroundColor Cyan
-    Write-Host ""
-
     $allModules = @(
         "Az.Accounts",
         "Microsoft.Graph.Authentication",
@@ -4965,6 +4960,11 @@ function Install-Prerequisites {
         return
     }
 
+    Write-Host ""
+    Write-Host "=====================================" -ForegroundColor Cyan
+    Write-Host "  Installing Prerequisites" -ForegroundColor Cyan
+    Write-Host "=====================================" -ForegroundColor Cyan
+    Write-Host ""
     Write-Host "The following modules need to be installed:" -ForegroundColor Yellow
     foreach ($module in $modulesToInstall) {
         Write-Host "  - $module" -ForegroundColor White
@@ -5050,12 +5050,14 @@ do {
 
             if ($script:IsRunningOnMac) {
                 Write-Host ""
-                Read-Host "Press ENTER to exit"
+                Write-Host "Closing terminal in 2 seconds..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 2
+                & osascript -e 'tell application "Terminal" to close first window' 2>$null
             } else {
                 Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
                 Start-Sleep -Seconds 2
+                [Environment]::Exit(0)
             }
-            exit 0
         }
     }
 } while ($true)
