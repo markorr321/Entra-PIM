@@ -1,47 +1,33 @@
 # ========================= Cross-Platform Keyboard Shortcuts =========================
-# Detect if running on macOS
-$script:IsMacOS = $IsMacOS -or ($PSVersionTable.OS -match 'Darwin')
+# Detect if running on macOS (use built-in $IsMacOS variable if available)
+$script:IsRunningOnMac = if ($null -ne $IsMacOS) { $IsMacOS } else { $PSVersionTable.OS -match 'Darwin' }
 
 # Cross-platform shortcut detection
 function Test-QuitShortcut {
     param([System.ConsoleKeyInfo]$Key)
 
-    if ($script:IsMacOS) {
-        # On macOS: Ctrl+Q may not work, also check for Escape
-        return ($Key.Key -eq 'Q' -and $Key.Modifiers -band [ConsoleModifiers]::Control) -or
-               ($Key.Key -eq 'Escape')
-    } else {
-        # On Windows: Ctrl+Q
-        return ($Key.Key -eq 'Q' -and $Key.Modifiers -eq 'Control')
-    }
+    # Ctrl+Q works on both macOS and Windows
+    return ($Key.Key -eq 'Q' -and ($Key.Modifiers -band [ConsoleModifiers]::Control))
 }
 
 function Test-HelpShortcut {
     param([System.ConsoleKeyInfo]$Key)
 
-    if ($script:IsMacOS) {
-        # On macOS: Ctrl+H sends backspace, so use ?
-        return ($Key.KeyChar -eq '?')
+    if ($script:IsRunningOnMac) {
+        # On macOS: Ctrl+H sends Backspace with Control modifier
+        return ($Key.Key -eq 'Backspace' -and ($Key.Modifiers -band [ConsoleModifiers]::Control))
     } else {
-        # On Windows: Ctrl+H or ?
-        return ($Key.Key -eq 'H' -and $Key.Modifiers -eq 'Control') -or ($Key.KeyChar -eq '?')
+        # On Windows: Ctrl+H works normally
+        return ($Key.Key -eq 'H' -and ($Key.Modifiers -band [ConsoleModifiers]::Control))
     }
 }
 
 function Get-HelpShortcutText {
-    if ($script:IsMacOS) {
-        return "? Help"
-    } else {
-        return "Ctrl+H Help"
-    }
+    return "Ctrl+H Help"
 }
 
 function Get-QuitShortcutText {
-    if ($script:IsMacOS) {
-        return "ESC Exit"
-    } else {
-        return "Ctrl+Q Exit"
-    }
+    return "Ctrl+Q Exit"
 }
 
 # ========================= Authentication =========================
@@ -1470,10 +1456,18 @@ function Show-PIMGlobalHeader {
         } catch {
             Write-Host "ℹ️ Already disconnected from Microsoft Graph." -ForegroundColor DarkGray
         }
-        
-        Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
-        Start-Sleep -Seconds 2
-        [Environment]::Exit(0)
+
+        if ($script:IsRunningOnMac) {
+            Write-Host ""
+            Write-Host "Closing terminal in 2 seconds..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 2
+            # Use AppleScript to close the Terminal window on macOS
+            & osascript -e 'tell application "Terminal" to close first window' 2>$null
+        } else {
+            Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
+            Start-Sleep -Seconds 2
+        }
+        exit 0
     }
     
     # Centralized key handler for common shortcuts
@@ -2987,7 +2981,18 @@ function Show-PIMGlobalHeader {
                 
                 # Get user input
                 $key = [Console]::ReadKey($true)
-                
+
+                # Check for quit shortcut first (Ctrl+Q on both platforms)
+                if (Test-QuitShortcut -Key $key) {
+                    Invoke-PIMExit -Message "Exiting PIM role management..."
+                }
+
+                # Check for help shortcut (Ctrl+H on both platforms)
+                if (Test-HelpShortcut -Key $key) {
+                    Show-HelpMenu
+                    continue
+                }
+
                 switch ($key.Key.ToString()) {
                     "UpArrow" {
                         $currentIndex = if ($currentIndex -gt 0) { $currentIndex - 1 } else { $Items.Count - 1 }
@@ -4043,9 +4048,14 @@ function Invoke-AzurePIMExit {
         Write-Host "ℹ️ Already disconnected from Azure." -ForegroundColor DarkGray
     }
 
-    Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
-    Start-Sleep -Seconds 2
-    [Environment]::Exit(0)
+    if ($script:IsRunningOnMac) {
+        Write-Host ""
+        Read-Host "Press ENTER to exit"
+    } else {
+        Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
+        Start-Sleep -Seconds 2
+    }
+    exit 0
 }
 
 function Show-AzureCheckboxMenu {
@@ -4862,6 +4872,7 @@ function Start-EntraPIMWorkflow {
     }
 
     $requiredGraphModules = @(
+        "Az.Accounts",
         "Microsoft.Graph.Authentication",
         "Microsoft.Graph.Identity.DirectoryManagement",
         "Microsoft.Graph.Identity.Governance"
@@ -4885,16 +4896,7 @@ function Start-EntraPIMWorkflow {
         Write-Host "Loading: " -NoNewline -ForegroundColor Gray
         Write-Host "$module" -ForegroundColor White
 
-        try {
-            Import-Module $module -Force -ErrorAction Stop
-            if (-not (Get-Module -Name $module)) {
-                throw "Module $module did not load properly"
-            }
-        } catch {
-            Write-Host "  ❌ Failed to load $module : $($_.Exception.Message)" -ForegroundColor Red
-            Write-Host "  Run: Install-Module $module -Scope CurrentUser -Force" -ForegroundColor Yellow
-            return
-        }
+        Import-Module $module -Force -ErrorAction SilentlyContinue
     }
 
     Write-Host ""
@@ -4937,7 +4939,77 @@ function Start-EntraPIMWorkflow {
     Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
 }
 
+# ========================= Prerequisites Installation =========================
+function Install-Prerequisites {
+    Write-Host ""
+    Write-Host "=====================================" -ForegroundColor Cyan
+    Write-Host "  Checking Prerequisites" -ForegroundColor Cyan
+    Write-Host "=====================================" -ForegroundColor Cyan
+    Write-Host ""
+
+    $allModules = @(
+        "Az.Accounts",
+        "Microsoft.Graph.Authentication",
+        "Microsoft.Graph.Identity.DirectoryManagement",
+        "Microsoft.Graph.Identity.Governance"
+    )
+
+    $modulesToInstall = @()
+    foreach ($module in $allModules) {
+        if (-not (Get-Module -ListAvailable -Name $module)) {
+            $modulesToInstall += $module
+        }
+    }
+
+    if ($modulesToInstall.Count -eq 0) {
+        return
+    }
+
+    Write-Host "The following modules need to be installed:" -ForegroundColor Yellow
+    foreach ($module in $modulesToInstall) {
+        Write-Host "  - $module" -ForegroundColor White
+    }
+    Write-Host ""
+    Write-Host "Installing modules... (this may take a few minutes)" -ForegroundColor Cyan
+    Write-Host ""
+
+    $barWidth = 30
+    $currentModule = 0
+    $totalModules = $modulesToInstall.Count
+
+    foreach ($module in $modulesToInstall) {
+        $currentModule++
+        $percent = [math]::Floor(($currentModule / $totalModules) * 100)
+        $filled = [math]::Floor(($currentModule / $totalModules) * $barWidth)
+        $empty = $barWidth - $filled
+        $bar = "█" * $filled + "░" * $empty
+
+        Write-Host "  [$bar] $percent% " -NoNewline -ForegroundColor Yellow
+        Write-Host "Installing: " -NoNewline -ForegroundColor Gray
+        Write-Host "$module" -ForegroundColor White
+
+        try {
+            Install-Module $module -Scope CurrentUser -Force -AllowClobber -ErrorAction Stop | Out-Null
+        } catch {
+            Write-Host "  ❌ Failed to install $module : $($_.Exception.Message)" -ForegroundColor Red
+            Write-Host "  Please run manually: Install-Module $module -Scope CurrentUser -Force" -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "Press Enter to exit..." -ForegroundColor Yellow
+            Read-Host
+            exit
+        }
+    }
+
+    Write-Host ""
+    Write-Host "✓ All prerequisites installed successfully!" -ForegroundColor Green
+    Write-Host ""
+    Start-Sleep -Seconds 2
+}
+
 # ========================= Main Entry Point =========================
+
+# Install prerequisites before starting
+Install-Prerequisites
 
 do {
     $workflow = Show-WorkflowSelector
@@ -4951,8 +5023,39 @@ do {
         }
         'Quit' {
             Clear-Host
-            Write-Host "Goodbye!" -ForegroundColor Cyan
-            [Environment]::Exit(0)
+            Write-Host "Exiting..." -ForegroundColor Yellow
+
+            # Disconnect from Microsoft Graph if connected
+            try {
+                $mgContext = Get-MgContext -ErrorAction SilentlyContinue
+                if ($mgContext) {
+                    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+                    Write-Host "✅ Disconnected from Microsoft Graph." -ForegroundColor Green
+                }
+            } catch {
+                Write-Host "ℹ️ Already disconnected from Microsoft Graph." -ForegroundColor DarkGray
+            }
+
+            # Disconnect from Azure if connected
+            try {
+                $azContext = Get-AzContext -ErrorAction SilentlyContinue
+                if ($azContext) {
+                    Disconnect-AzAccount -ErrorAction SilentlyContinue | Out-Null
+                    Clear-AzContext -Force -ErrorAction SilentlyContinue | Out-Null
+                    Write-Host "✅ Disconnected from Azure." -ForegroundColor Green
+                }
+            } catch {
+                Write-Host "ℹ️ Already disconnected from Azure." -ForegroundColor DarkGray
+            }
+
+            if ($script:IsRunningOnMac) {
+                Write-Host ""
+                Read-Host "Press ENTER to exit"
+            } else {
+                Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
+                Start-Sleep -Seconds 2
+            }
+            exit 0
         }
     }
 } while ($true)
