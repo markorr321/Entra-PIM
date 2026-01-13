@@ -6,7 +6,7 @@
     RootModule = 'Entra-PIM.psm1'
 
     # Version number of this module (SemVer format for PSResourceGet)
-    ModuleVersion = '2.0.3'
+    ModuleVersion = '2.0.4'
 
     # ID used to uniquely identify this module
     GUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
@@ -58,6 +58,10 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+## 2.0.4
+- Fixed exit behavior - no longer kills parent apps like VS Code or Windows Terminal
+- Only terminates parent PowerShell processes when running nested
+
 ## 2.0.3
 - Performance optimization: REST API calls with $select for faster role loading
 - Fixed deactivation workflow - includes all required fields (PrincipalId, DirectoryScopeId)

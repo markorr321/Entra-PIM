@@ -1502,12 +1502,14 @@ function Show-PIMGlobalHeader {
         Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
         Start-Sleep -Seconds 2
         
-        # Kill the entire process tree (current + parent)
-        $parentId = (Get-Process -Id $PID).Parent.Id
-        if ($parentId) {
-            Stop-Process -Id $parentId -Force -ErrorAction SilentlyContinue
-        }
-        Stop-Process -Id $PID -Force
+        # Only kill parent if it's another PowerShell process (not VS Code, Terminal, etc.)
+        try {
+            $parent = (Get-Process -Id $PID).Parent
+            if ($parent -and $parent.ProcessName -match 'pwsh|powershell') {
+                Stop-Process -Id $parent.Id -Force -ErrorAction SilentlyContinue
+            }
+        } catch { }
+        [Environment]::Exit(0)
     }
 
     # Centralized key handler for common shortcuts
@@ -4122,12 +4124,14 @@ function Invoke-AzurePIMExit {
     Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
     Start-Sleep -Seconds 2
     
-    # Kill the entire process tree (current + parent)
-    $parentId = (Get-Process -Id $PID).Parent.Id
-    if ($parentId) {
-        Stop-Process -Id $parentId -Force -ErrorAction SilentlyContinue
-    }
-    Stop-Process -Id $PID -Force
+    # Only kill parent if it's another PowerShell process (not VS Code, Terminal, etc.)
+    try {
+        $parent = (Get-Process -Id $PID).Parent
+        if ($parent -and $parent.ProcessName -match 'pwsh|powershell') {
+            Stop-Process -Id $parent.Id -Force -ErrorAction SilentlyContinue
+        }
+    } catch { }
+    [Environment]::Exit(0)
 }
 
 function Show-AzureCheckboxMenu {
@@ -5109,12 +5113,14 @@ function Invoke-GracefulExit {
     Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
     Start-Sleep -Seconds 2
     
-    # Kill the entire process tree (current + parent)
-    $parentId = (Get-Process -Id $PID).Parent.Id
-    if ($parentId) {
-        Stop-Process -Id $parentId -Force -ErrorAction SilentlyContinue
-    }
-    Stop-Process -Id $PID -Force
+    # Only kill parent if it's another PowerShell process (not VS Code, Terminal, etc.)
+    try {
+        $parent = (Get-Process -Id $PID).Parent
+        if ($parent -and $parent.ProcessName -match 'pwsh|powershell') {
+            Stop-Process -Id $parent.Id -Force -ErrorAction SilentlyContinue
+        }
+    } catch { }
+    [Environment]::Exit(0)
 }
 
 # Install prerequisites before starting
