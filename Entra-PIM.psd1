@@ -6,7 +6,7 @@
     RootModule = 'Entra-PIM.psm1'
 
     # Version number of this module (SemVer format for PSResourceGet)
-    ModuleVersion = '2.0.6'
+    ModuleVersion = '2.0.7'
 
     # ID used to uniquely identify this module
     GUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
@@ -58,6 +58,9 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+## 2.0.7
+- Additional macOS compatibility improvements
+
 ## 2.0.6
 - Fixed macOS auto-exit issue - clear input buffer after setting TreatControlCAsInput
 
