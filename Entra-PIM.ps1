@@ -1525,16 +1525,18 @@ function Show-PIMGlobalHeader {
             Write-Host "ℹ️ Already disconnected from Microsoft Graph." -ForegroundColor DarkGray
         }
 
+        Write-Host ""
         Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
         Start-Sleep -Seconds 2
-        
-        # Only kill parent if it's another PowerShell process (not VS Code, Terminal, etc.)
-        try {
-            $parent = (Get-Process -Id $PID).Parent
-            if ($parent -and $parent.ProcessName -match 'pwsh|powershell') {
-                Stop-Process -Id $parent.Id -Force -ErrorAction SilentlyContinue
-            }
-        } catch { }
+
+        if ($script:IsRunningOnMac) {
+            # Kill the terminal window directly to avoid session save messages
+            & osascript -e 'tell application "Terminal" to close first window' 2>$null
+            Start-Sleep -Milliseconds 500
+            # If still running (e.g., iTerm2 or osascript failed), force kill this process
+            Stop-Process -Id $PID -Force 2>$null
+        }
+
         [Environment]::Exit(0)
     }
 
@@ -4153,16 +4155,18 @@ function Invoke-AzurePIMExit {
         Write-Host "ℹ️ Already disconnected from Azure." -ForegroundColor DarkGray
     }
 
+    Write-Host ""
     Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
     Start-Sleep -Seconds 2
-    
-    # Only kill parent if it's another PowerShell process (not VS Code, Terminal, etc.)
-    try {
-        $parent = (Get-Process -Id $PID).Parent
-        if ($parent -and $parent.ProcessName -match 'pwsh|powershell') {
-            Stop-Process -Id $parent.Id -Force -ErrorAction SilentlyContinue
-        }
-    } catch { }
+
+    if ($script:IsRunningOnMac) {
+        # Kill the terminal window directly to avoid session save messages
+        & osascript -e 'tell application "Terminal" to close first window' 2>$null
+        Start-Sleep -Milliseconds 500
+        # If still running (e.g., iTerm2 or osascript failed), force kill this process
+        Stop-Process -Id $PID -Force 2>$null
+    }
+
     [Environment]::Exit(0)
 }
 
@@ -5144,16 +5148,18 @@ function Invoke-GracefulExit {
         }
     } catch { }
 
+    Write-Host ""
     Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
     Start-Sleep -Seconds 2
-    
-    # Only kill parent if it's another PowerShell process (not VS Code, Terminal, etc.)
-    try {
-        $parent = (Get-Process -Id $PID).Parent
-        if ($parent -and $parent.ProcessName -match 'pwsh|powershell') {
-            Stop-Process -Id $parent.Id -Force -ErrorAction SilentlyContinue
-        }
-    } catch { }
+
+    if ($script:IsRunningOnMac) {
+        # Kill the terminal window directly to avoid session save messages
+        & osascript -e 'tell application "Terminal" to close first window' 2>$null
+        Start-Sleep -Milliseconds 500
+        # If still running (e.g., iTerm2 or osascript failed), force kill this process
+        Stop-Process -Id $PID -Force 2>$null
+    }
+
     [Environment]::Exit(0)
 }
 
