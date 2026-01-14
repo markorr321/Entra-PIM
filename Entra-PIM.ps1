@@ -1530,14 +1530,13 @@ function Show-PIMGlobalHeader {
         Start-Sleep -Seconds 2
 
         if ($script:IsRunningOnMac) {
-            # Kill the terminal window directly to avoid session save messages
+            # Close the terminal window to avoid session save messages
             & osascript -e 'tell application "Terminal" to close first window' 2>$null
             Start-Sleep -Milliseconds 500
-            # If still running (e.g., iTerm2 or osascript failed), force kill this process
-            Stop-Process -Id $PID -Force 2>$null
         }
 
-        [Environment]::Exit(0)
+        # Exit gracefully
+        exit
     }
 
     # Centralized key handler for common shortcuts
