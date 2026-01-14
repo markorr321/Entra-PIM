@@ -6,6 +6,11 @@ $script:IsRunningOnMac = if ($null -ne $IsMacOS) { $IsMacOS } else { $PSVersionT
 # This must be set before any [Console]::ReadKey() calls
 if ($script:IsRunningOnMac -or ($null -ne $IsLinux -and $IsLinux)) {
     [Console]::TreatControlCAsInput = $true
+    # Clear any buffered input that may have been queued when setting TreatControlCAsInput
+    Start-Sleep -Milliseconds 100
+    while ([Console]::KeyAvailable) {
+        $null = [Console]::ReadKey($true)
+    }
 }
 
 # Cross-platform shortcut detection
