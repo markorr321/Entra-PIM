@@ -6,7 +6,7 @@
     RootModule = 'Entra-PIM.psm1'
 
     # Version number of this module (SemVer format for PSResourceGet)
-    ModuleVersion = '2.0.4'
+    ModuleVersion = '2.0.5'
 
     # ID used to uniquely identify this module
     GUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
@@ -58,6 +58,11 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+## 2.0.5
+- Fixed Ctrl+C not working on macOS - now properly captures as keyboard input
+- Added TreatControlCAsInput for macOS/Linux platforms
+- Ctrl+C now works as quit shortcut alongside Ctrl+Q on all platforms
+
 ## 2.0.4
 - Fixed exit behavior - no longer kills parent apps like VS Code or Windows Terminal
 - Only terminates parent PowerShell processes when running nested

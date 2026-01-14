@@ -2,12 +2,27 @@
 # Detect if running on macOS (use built-in $IsMacOS variable if available)
 $script:IsRunningOnMac = if ($null -ne $IsMacOS) { $IsMacOS } else { $PSVersionTable.OS -match 'Darwin' }
 
+# Enable Ctrl+C as input on macOS/Linux (prevents SIGINT from terminating the script)
+# This must be set before any [Console]::ReadKey() calls
+if ($script:IsRunningOnMac -or ($null -ne $IsLinux -and $IsLinux)) {
+    [Console]::TreatControlCAsInput = $true
+}
+
 # Cross-platform shortcut detection
+function Test-CancelShortcut {
+    param([System.ConsoleKeyInfo]$Key)
+
+    # Ctrl+C for cancel/exit on all platforms
+    return ($Key.Key -eq 'C' -and ($Key.Modifiers -band [ConsoleModifiers]::Control))
+}
+
 function Test-QuitShortcut {
     param([System.ConsoleKeyInfo]$Key)
 
     # Ctrl+Q works on both macOS and Windows
-    return ($Key.Key -eq 'Q' -and ($Key.Modifiers -band [ConsoleModifiers]::Control))
+    # Also accept Ctrl+C as quit shortcut (especially important for macOS)
+    return (($Key.Key -eq 'Q' -and ($Key.Modifiers -band [ConsoleModifiers]::Control)) -or
+            ($Key.Key -eq 'C' -and ($Key.Modifiers -band [ConsoleModifiers]::Control)))
 }
 
 function Test-HelpShortcut {
@@ -377,6 +392,10 @@ function Show-NoWorkflowsAndWaitForExit {
         $key = [Console]::ReadKey($true)
         if (Test-QuitShortcut -Key $key) {
             Invoke-PIMExit -Message "Exiting PIM role management..."
+        }
+        # Handle Ctrl+C (especially important for macOS)
+        if (Test-CancelShortcut -Key $key) {
+            Invoke-PIMExit -Message "Operation cancelled..."
         }
     } while ($true)
 }
@@ -1489,6 +1508,8 @@ function Show-PIMGlobalHeader {
         )
         
         [Console]::CursorVisible = $true
+        # Restore Ctrl+C default behavior before exiting
+        [Console]::TreatControlCAsInput = $false
         Clear-Host
         Write-Host $Message -ForegroundColor Yellow
         
@@ -1521,6 +1542,12 @@ function Show-PIMGlobalHeader {
         # Handle Ctrl+Q globally
         if ($Key.Key -eq 'Q' -and $Key.Modifiers -eq 'Control') {
             Invoke-PIMExit
+            return $true
+        }
+
+        # Handle Ctrl+C globally (especially important for macOS)
+        if (Test-CancelShortcut -Key $Key) {
+            Invoke-PIMExit -Message "Operation cancelled..."
             return $true
         }
 
@@ -5088,6 +5115,8 @@ function Invoke-GracefulExit {
     param([string]$Reason = "Exiting...")
 
     [Console]::CursorVisible = $true
+    # Restore Ctrl+C default behavior before exiting
+    [Console]::TreatControlCAsInput = $false
     Clear-Host
     Write-Host $Reason -ForegroundColor Yellow
 
