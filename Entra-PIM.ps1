@@ -1,3 +1,16 @@
+# ========================= Script Parameters =========================
+param(
+    [Parameter(HelpMessage = "Client ID of the app registration to use for delegated auth")]
+    [string]$ClientId,
+
+    [Parameter(HelpMessage = "Tenant ID to use with the specified app registration")]
+    [string]$TenantId
+)
+
+# Store parameters at script scope for use in authentication functions
+$script:CustomClientId = $ClientId
+$script:CustomTenantId = $TenantId
+
 # ========================= Cross-Platform Keyboard Shortcuts =========================
 # Detect if running on macOS (use built-in $IsMacOS variable if available)
 $script:IsRunningOnMac = if ($null -ne $IsMacOS) { $IsMacOS } else { $PSVersionTable.OS -match 'Darwin' }
@@ -188,16 +201,16 @@ using Microsoft.Identity.Client;
 
 public class PIMBrowserAuth
 {
-    public static string GetAccessToken(string clientId, string[] scopes)
+    public static string GetAccessToken(string clientId, string[] scopes, string tenantId = null)
     {
-        return GetAccessTokenWithClaims(clientId, scopes, null);
+        return GetAccessTokenWithClaims(clientId, scopes, null, tenantId);
     }
 
-    public static string GetAccessTokenWithClaims(string clientId, string[] scopes, string claims)
+    public static string GetAccessTokenWithClaims(string clientId, string[] scopes, string claims, string tenantId = null)
     {
         try
         {
-            var task = Task.Run(async () => await GetAccessTokenAsync(clientId, scopes, claims));
+            var task = Task.Run(async () => await GetAccessTokenAsync(clientId, scopes, claims, tenantId));
             if (task.Wait(TimeSpan.FromSeconds(180)))
             {
                 return task.Result;
@@ -211,26 +224,33 @@ public class PIMBrowserAuth
         }
     }
 
-    private static async Task<string> GetAccessTokenAsync(string clientId, string[] scopes, string claims)
+    private static async Task<string> GetAccessTokenAsync(string clientId, string[] scopes, string claims, string tenantId)
     {
         // Use system browser to bypass Windows PRT - forces fresh passkey auth every time
-        IPublicClientApplication publicClientApp = PublicClientApplicationBuilder.Create(clientId)
-            .WithRedirectUri("http://localhost")
-            .Build();
+        var builder = PublicClientApplicationBuilder.Create(clientId)
+            .WithRedirectUri("http://localhost");
+
+        // Add tenant ID if provided (for dedicated app registrations)
+        if (!string.IsNullOrEmpty(tenantId))
+        {
+            builder = builder.WithAuthority(AzureCloudInstance.AzurePublic, tenantId);
+        }
+
+        IPublicClientApplication publicClientApp = builder.Build();
 
         using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(180)))
         {
-            var builder = publicClientApp.AcquireTokenInteractive(scopes)
+            var tokenBuilder = publicClientApp.AcquireTokenInteractive(scopes)
                 .WithPrompt(Prompt.ForceLogin)
                 .WithUseEmbeddedWebView(false);
 
             // Add claims challenge if provided (for Conditional Access step-up)
             if (!string.IsNullOrEmpty(claims))
             {
-                builder = builder.WithClaims(claims);
+                tokenBuilder = tokenBuilder.WithClaims(claims);
             }
 
-            var result = await builder
+            var result = await tokenBuilder
                 .ExecuteAsync(cts.Token)
                 .ConfigureAwait(false);
 
@@ -269,15 +289,16 @@ function Get-BrowserAccessToken {
         $null = Initialize-MSALHelper
     }
 
-    # Use Microsoft's well-known PowerShell public client ID (no app registration required)
-    $clientId = "14d82eec-204b-4c2f-b7e8-296a70dab67e"
+    # Use custom ClientId if provided, otherwise use Microsoft's well-known PowerShell public client ID
+    $clientId = if ($script:CustomClientId) { $script:CustomClientId } else { "14d82eec-204b-4c2f-b7e8-296a70dab67e" }
+    $tenantId = $script:CustomTenantId  # May be null, which is fine
 
     # Build scopes string for Graph
     $scopeArray = $Scopes | ForEach-Object {
         if ($_ -notlike "https://*") { "https://graph.microsoft.com/$_" } else { $_ }
     }
 
-    $accessToken = [PIMBrowserAuth]::GetAccessToken($clientId, $scopeArray)
+    $accessToken = [PIMBrowserAuth]::GetAccessToken($clientId, $scopeArray, $tenantId)
     return $accessToken
 }
 
@@ -296,15 +317,16 @@ function Get-BrowserAccessTokenWithClaims {
         $null = Initialize-MSALHelper
     }
 
-    # Use Microsoft's well-known PowerShell public client ID (no app registration required)
-    $clientId = "14d82eec-204b-4c2f-b7e8-296a70dab67e"
+    # Use custom ClientId if provided, otherwise use Microsoft's well-known PowerShell public client ID
+    $clientId = if ($script:CustomClientId) { $script:CustomClientId } else { "14d82eec-204b-4c2f-b7e8-296a70dab67e" }
+    $tenantId = $script:CustomTenantId  # May be null, which is fine
 
     # Build scopes string for Graph
     $scopeArray = $Scopes | ForEach-Object {
         if ($_ -notlike "https://*") { "https://graph.microsoft.com/$_" } else { $_ }
     }
 
-    $accessToken = [PIMBrowserAuth]::GetAccessTokenWithClaims($clientId, $scopeArray, $Claims)
+    $accessToken = [PIMBrowserAuth]::GetAccessTokenWithClaims($clientId, $scopeArray, $Claims, $tenantId)
     return $accessToken
 }
 
