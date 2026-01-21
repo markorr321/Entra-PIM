@@ -6,7 +6,7 @@
     RootModule = 'Entra-PIM.psm1'
 
     # Version number of this module (SemVer format for PSResourceGet)
-    ModuleVersion = '2.0.7'
+    ModuleVersion = '2.0.8'
 
     # ID used to uniquely identify this module
     GUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
@@ -58,6 +58,11 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+## 2.0.8
+- Added ClientId and TenantId parameters for custom app registration support
+- Switched to least-privilege Graph permissions for better security
+- Fixed macOS terminal exit to avoid session save messages
+
 ## 2.0.7
 - Additional macOS compatibility improvements
 
