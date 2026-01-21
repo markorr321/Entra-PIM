@@ -51,7 +51,12 @@ When both are provided, authentication uses the supplied app; otherwise, the def
 - Platform: Mobile and desktop applications
 - Redirect URI: `http://localhost`
 - Allow public client flows: Yes
-- API Permissions (delegated): `RoleManagement.ReadWrite.Directory`, `Directory.Read.All`
+- API Permissions (delegated):
+  - `User.Read`
+  - `RoleAssignmentSchedule.ReadWrite.Directory`
+  - `RoleEligibilitySchedule.ReadWrite.Directory`
+  - `RoleManagement.Read.Directory`
+  - `RoleManagementPolicy.Read.Directory`
 
 ## Keyboard Shortcuts
 

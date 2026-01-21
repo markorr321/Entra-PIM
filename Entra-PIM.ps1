@@ -2037,7 +2037,12 @@ function Show-PIMGlobalHeader {
                             
                             try {
                                 # Get new token with claims challenge
-                                $scopes = @('RoleManagement.ReadWrite.Directory', 'Directory.Read.All')
+                                $scopes = @(
+                                    'RoleAssignmentSchedule.ReadWrite.Directory',
+                                    'RoleEligibilitySchedule.ReadWrite.Directory',
+                                    'RoleManagement.Read.Directory',
+                                    'RoleManagementPolicy.Read.Directory'
+                                )
                                 $newToken = Get-BrowserAccessTokenWithClaims -Scopes $scopes -Claims $decodedClaims
                                 
                                 if ($newToken) {
@@ -5041,7 +5046,12 @@ function Start-EntraPIMWorkflow {
     [Console]::CursorVisible = $false
 
     try {
-        $scopes = @('RoleManagement.ReadWrite.Directory', 'Directory.Read.All')
+        $scopes = @(
+            'RoleAssignmentSchedule.ReadWrite.Directory',
+            'RoleEligibilitySchedule.ReadWrite.Directory',
+            'RoleManagement.Read.Directory',
+            'RoleManagementPolicy.Read.Directory'
+        )
         $connected = Connect-MgGraphWithBrowser -Scopes $scopes
 
         if (-not $connected) {
