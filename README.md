@@ -37,6 +37,22 @@ That's it! The tool will:
 3. Show your eligible/active PIM roles
 4. Let you activate or deactivate roles interactively
 
+### Use a Custom App Registration (Optional)
+
+If your organization requires using a dedicated app registration for delegated auth, provide ClientId and TenantId:
+
+```powershell
+Start-EntraPIM -ClientId "<appId>" -TenantId "<tenantId>"
+```
+
+When both are provided, authentication uses the supplied app; otherwise, the default interactive flow is used.
+
+**App Registration Requirements:**
+- Platform: Mobile and desktop applications
+- Redirect URI: `http://localhost`
+- Allow public client flows: Yes
+- API Permissions (delegated): `RoleManagement.ReadWrite.Directory`, `Directory.Read.All`
+
 ## Keyboard Shortcuts
 
 | Shortcut | Action |
