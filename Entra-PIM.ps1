@@ -226,7 +226,7 @@ public class PIMBrowserAuth
 
     private static async Task<string> GetAccessTokenAsync(string clientId, string[] scopes, string claims, string tenantId)
     {
-        // Use system browser to bypass Windows PRT - forces fresh passkey auth every time
+        // Use system browser with localhost redirect - must match app registration
         var builder = PublicClientApplicationBuilder.Create(clientId)
             .WithRedirectUri("http://localhost");
 
@@ -242,7 +242,8 @@ public class PIMBrowserAuth
         {
             var tokenBuilder = publicClientApp.AcquireTokenInteractive(scopes)
                 .WithPrompt(Prompt.ForceLogin)
-                .WithUseEmbeddedWebView(false);
+                .WithUseEmbeddedWebView(false)
+                .WithSystemWebViewOptions(new SystemWebViewOptions());
 
             // Add claims challenge if provided (for Conditional Access step-up)
             if (!string.IsNullOrEmpty(claims))
