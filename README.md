@@ -92,11 +92,18 @@ Update-Module -Name Entra-PIM
 Update-PSResource -Name Entra-PIM
 ```
 
-## What's New in 2.0.0
+## What's New in 2.0.8
+
+- **Custom App Registration**: Support for using your own app registration with `-ClientId` and `-TenantId` parameters
+- **Least-Privilege Permissions**: Uses granular, minimal permissions for PIM operations
+- **macOS Compatibility**: Improved terminal handling and keyboard shortcuts for macOS
+- **Better Exit Handling**: Fixed Ctrl+C behavior and terminal exit issues across platforms
+
+### Previous Highlights (2.0.0)
 
 - **Azure Resource Roles**: Full support for Azure Resource PIM alongside Entra ID roles
 - **Workflow Selector**: Choose between Entra ID and Azure Resource PIM at startup
-- **Cross-Platform**: Now works on macOS in addition to Windows
+- **Cross-Platform**: Works on Windows and macOS
 - **Silent Prerequisites**: Only shows installation output when modules need installing
 
 ## Tags
