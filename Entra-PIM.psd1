@@ -6,7 +6,7 @@
     RootModule = 'Entra-PIM.psm1'
 
     # Version number of this module (SemVer format for PSResourceGet)
-    ModuleVersion = '2.0.9'
+    ModuleVersion = '2.1.0'
 
     # ID used to uniquely identify this module
     GUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
@@ -29,8 +29,8 @@
     # Modules that must be imported into the global environment prior to importing this module
     # RequiredModules = @()  # Dependencies checked at runtime instead
 
-    # Functions to export from this module - just one simple command
-    FunctionsToExport = @('Start-EntraPIM')
+    # Functions to export from this module
+    FunctionsToExport = @('Start-EntraPIM', 'Configure-EntraPIM', 'Clear-EntraPIMConfig', 'Get-EntraPIMHelp')
 
     # Cmdlets to export from this module
     CmdletsToExport = @()
@@ -58,6 +58,15 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+## 2.1.0
+- Added Configure-EntraPIM command for persistent configuration via environment variables
+- Added Clear-EntraPIMConfig command to remove saved configuration
+- Added Get-EntraPIMHelp command for comprehensive command reference
+- Added visual confirmation of which app registration is being used during authentication
+- Fixed Windows terminal exit behavior for Ctrl+Q in Entra workflow
+- Fixed MSAL assembly conflict when multiple Microsoft modules are loaded
+- macOS: Automatic PowerShell profile integration for persistent configuration
+
 ## 2.0.9
 - Bug fix: Module wrapper now properly exposes ClientId and TenantId parameters
 

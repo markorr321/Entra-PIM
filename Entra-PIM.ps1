@@ -139,7 +139,7 @@ function Initialize-MSALAssemblies {
 
     # Load abstractions first if available
     if ($abstractionsDll -and (Test-Path $abstractionsDll)) {
-        $alreadyLoaded = $loadedAssembliesCheck | Where-Object { $_.GetName().Name -eq 'Microsoft.IdentityModel.Abstractions' }
+        $alreadyLoaded = $loadedAssembliesCheck | Where-Object { $_.GetName().Name -eq 'Microsoft.IdentityModel.Abstractions' } | Select-Object -First 1
         if (-not $alreadyLoaded) {
             try {
                 [void][System.Reflection.Assembly]::LoadFrom($abstractionsDll)
@@ -151,7 +151,7 @@ function Initialize-MSALAssemblies {
     }
 
     # Load MSAL
-    $alreadyLoaded = $loadedAssembliesCheck | Where-Object { $_.GetName().Name -eq 'Microsoft.Identity.Client' }
+    $alreadyLoaded = $loadedAssembliesCheck | Where-Object { $_.GetName().Name -eq 'Microsoft.Identity.Client' } | Select-Object -First 1
     if (-not $alreadyLoaded) {
         try {
             [void][System.Reflection.Assembly]::LoadFrom($msalDll)
@@ -340,6 +340,17 @@ function Connect-MgGraphWithBrowser {
     try {
         # Clear any existing Graph context first
         try { Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null } catch { }
+
+        # Show which app registration is being used
+        if ($script:CustomClientId) {
+            Write-Host "Using custom app registration..." -ForegroundColor Cyan
+            Write-Host "  Client ID: $($script:CustomClientId)" -ForegroundColor Gray
+            if ($script:CustomTenantId) {
+                Write-Host "  Tenant ID: $($script:CustomTenantId)" -ForegroundColor Gray
+            }
+        } else {
+            Write-Host "Using default Microsoft Graph authentication..." -ForegroundColor Cyan
+        }
 
         Write-Host "Opening browser for authentication..." -ForegroundColor Cyan
 
@@ -1559,7 +1570,7 @@ function Show-PIMGlobalHeader {
         }
 
         # Exit gracefully
-        exit
+        [Environment]::Exit(0)
     }
 
     # Centralized key handler for common shortcuts
