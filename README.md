@@ -155,4 +155,4 @@ Update-PSResource -Name Entra-PIM
 
 ## Tags
 
-Entra, PIM, Azure, Identity, Governance, MicrosoftGraph, Privileged, RoleManagement, AzureResources, CrossPlatform
+Entra, PIM, Azure, Identity, Governance, MicrosoftGraph, Privileged, RoleManagement, AzureResources, CrossPlatform, PowerShell
