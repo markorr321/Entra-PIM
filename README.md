@@ -7,6 +7,7 @@ PowerShell module for managing Microsoft Entra PIM (Privileged Identity Manageme
 - **Dual PIM Support**: Manage both Entra ID roles and Azure Resource roles from one tool
 - **Cross-Platform**: Works on Windows and macOS
 - **Browser Authentication**: Secure authentication with ForceLogin prompt
+- **Persistent Configuration**: Save custom app registration settings via environment variables
 - **Step-up MFA**: Automatic handling of MFA/claims challenges for privileged roles
 - **Interactive Console**: Easy-to-use TUI for role selection
 - **Auto-Dependencies**: Automatically installs required modules on first run
@@ -37,26 +38,63 @@ That's it! The tool will:
 3. Show your eligible/active PIM roles
 4. Let you activate or deactivate roles interactively
 
-### Use a Custom App Registration (Optional)
+## Configuration
 
-If your organization requires using a dedicated app registration for delegated auth, provide ClientId and TenantId:
+### Persistent Configuration (Recommended for Custom App Registrations)
+
+If your organization requires a custom app registration, you can configure it once and use `Start-EntraPIM` without parameters:
+
+```powershell
+# Configure once
+Configure-EntraPIM
+```
+
+You'll be prompted to enter your ClientId and TenantId. These are saved as environment variables that persist across PowerShell sessions.
+
+**On Windows:** Configuration is saved to user-level environment variables automatically.
+
+**On macOS:** You'll be offered the option to add the configuration to your PowerShell profile for persistence across sessions.
+
+After configuration, simply run:
+
+```powershell
+Start-EntraPIM
+```
+
+To remove the saved configuration and return to default authentication:
+
+```powershell
+Clear-EntraPIMConfig
+```
+
+### One-Time Custom App Registration
+
+For temporary use of a custom app registration (single session only):
 
 ```powershell
 Start-EntraPIM -ClientId "<appId>" -TenantId "<tenantId>"
 ```
 
-When both are provided, authentication uses the supplied app; otherwise, the default interactive flow is used.
+### App Registration Requirements
 
-**App Registration Requirements:**
-- Platform: Mobile and desktop applications
-- Redirect URI: `http://localhost`
-- Allow public client flows: Yes
-- API Permissions (delegated):
+When using a custom app registration, configure it with:
+
+- **Platform**: Mobile and desktop applications
+- **Redirect URI**: `http://localhost`
+- **Allow public client flows**: Yes
+- **API Permissions** (delegated):
   - `User.Read`
   - `RoleAssignmentSchedule.ReadWrite.Directory`
   - `RoleEligibilitySchedule.ReadWrite.Directory`
   - `RoleManagement.Read.Directory`
   - `RoleManagementPolicy.Read.Directory`
+
+## Available Commands
+
+- **Start-EntraPIM** - Launch the PIM role management tool
+- **Configure-EntraPIM** - Set up persistent custom app registration configuration
+- **Clear-EntraPIMConfig** - Remove saved configuration
+- **Get-EntraPIMHelp** - Display comprehensive help and command reference
 
 ## Keyboard Shortcuts
 
@@ -92,19 +130,28 @@ Update-Module -Name Entra-PIM
 Update-PSResource -Name Entra-PIM
 ```
 
-## What's New in 2.0.8
+## What's New in 2.1.0
 
-- **Custom App Registration**: Support for using your own app registration with `-ClientId` and `-TenantId` parameters
-- **Least-Privilege Permissions**: Uses granular, minimal permissions for PIM operations
-- **macOS Compatibility**: Improved terminal handling and keyboard shortcuts for macOS
-- **Better Exit Handling**: Fixed Ctrl+C behavior and terminal exit issues across platforms
+- **Configure-EntraPIM Command**: Persistent configuration via environment variables - configure once, use everywhere
+- **Clear-EntraPIMConfig Command**: Easy removal of saved configuration
+- **Get-EntraPIMHelp Command**: Comprehensive built-in help and command reference
+- **Visual Confirmation**: See which app registration is being used during authentication
+- **Windows Terminal Fix**: Ctrl+Q now properly closes the terminal in Entra workflow
+- **MSAL Conflict Fix**: Resolved assembly conflicts when multiple Microsoft modules are loaded
+- **macOS Profile Integration**: Automatic PowerShell profile integration for persistent configuration on macOS
 
-### Previous Highlights (2.0.0)
+### Previous Highlights
 
-- **Azure Resource Roles**: Full support for Azure Resource PIM alongside Entra ID roles
-- **Workflow Selector**: Choose between Entra ID and Azure Resource PIM at startup
-- **Cross-Platform**: Works on Windows and macOS
-- **Silent Prerequisites**: Only shows installation output when modules need installing
+**Version 2.0.8**
+- Custom App Registration support with `-ClientId` and `-TenantId` parameters
+- Least-privilege Graph permissions for better security
+- macOS compatibility improvements
+
+**Version 2.0.0**
+- Azure Resource Roles support alongside Entra ID roles
+- Workflow selector for choosing between Entra ID and Azure Resource PIM
+- Cross-platform support (Windows and macOS)
+- Silent prerequisite installation
 
 ## Tags
 
