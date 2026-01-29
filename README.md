@@ -14,7 +14,7 @@ PowerShell module for managing Microsoft Entra PIM (Privileged Identity Manageme
 
 ## Demo
 
-**[📺 Watch Demo Video](./Entra-PIM-Demo.mp4)** - See the complete workflow including authentication, role selection, and activation for both Entra ID and Azure Resource roles.
+**[📺 Watch Demo Video](./Entra-PIM-Demo.mp4)** - See the complete workflow including authentication, role selection, and activation for both Entra ID roles.
 
 https://github.com/user-attachments/assets/42ba881e-8818-4a8f-820d-1ffd80bfcbfb
 
