@@ -12,6 +12,10 @@ PowerShell module for managing Microsoft Entra PIM (Privileged Identity Manageme
 - **Interactive Console**: Easy-to-use TUI for role selection
 - **Auto-Dependencies**: Automatically installs required modules on first run
 
+## Demo
+
+**[📺 Watch Demo Video](./Entra-PIM-Demo.mp4)** - See the complete workflow including authentication, role selection, and activation for both Entra ID and Azure Resource roles.
+
 ## Installation
 
 ### Using PowerShellGet
