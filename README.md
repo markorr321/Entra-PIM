@@ -136,7 +136,38 @@ Update-Module -Name Entra-PIM
 Update-PSResource -Name Entra-PIM
 ```
 
-## What's New in 2.1.0
+### Update Notifications
+
+Entra-PIM automatically checks for updates once per day and notifies you when a newer version is available on PowerShell Gallery. The check happens when you first import the module in a new PowerShell session.
+
+**Example notification:**
+```
+[!] Entra-PIM update available: 2.1.0 -> 2.2.0 | Run: Update-Module -Name Entra-PIM
+```
+
+The version check:
+- Runs automatically once per 24 hours
+- Uses cached results to minimize network calls
+- Has a 5-second timeout to prevent delays
+- Silently handles offline scenarios (no errors if network is unavailable)
+- Works cross-platform (Windows, macOS, Linux)
+
+**To disable update notifications:**
+```powershell
+[System.Environment]::SetEnvironmentVariable('ENTRAPIM_DISABLE_UPDATE_CHECK', 'true', 'User')
+```
+
+## What's New in 2.2.0
+
+- **Automatic Update Notifications**: Checks PowerShell Gallery once per 24 hours for new versions
+- **Inline Red Notification**: Clean, single-line alert when updates are available
+- **Smart Caching**: Minimizes network calls with 24-hour cached results
+- **Non-Blocking**: 5-second timeout ensures module import isn't delayed
+- **Optional Disable**: Can be turned off via environment variable
+
+### Previous Highlights
+
+**Version 2.1.0**
 
 - **Configure-EntraPIM Command**: Persistent configuration via environment variables - configure once, use everywhere
 - **Clear-EntraPIMConfig Command**: Easy removal of saved configuration
@@ -145,8 +176,6 @@ Update-PSResource -Name Entra-PIM
 - **Windows Terminal Fix**: Ctrl+Q now properly closes the terminal in Entra workflow
 - **MSAL Conflict Fix**: Resolved assembly conflicts when multiple Microsoft modules are loaded
 - **macOS Profile Integration**: Automatic PowerShell profile integration for persistent configuration on macOS
-
-### Previous Highlights
 
 **Version 2.0.8**
 - Custom App Registration support with `-ClientId` and `-TenantId` parameters

@@ -6,7 +6,7 @@
     RootModule = 'Entra-PIM.psm1'
 
     # Version number of this module (SemVer format for PSResourceGet)
-    ModuleVersion = '2.1.0'
+    ModuleVersion = '2.2.0'
 
     # ID used to uniquely identify this module
     GUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
@@ -58,6 +58,13 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+## 2.2.0
+- Added automatic update notifications - checks PowerShell Gallery once per 24 hours
+- Inline red notification when newer version is available
+- Cached version checks to minimize network calls
+- 5-second timeout for non-blocking updates
+- Can be disabled via ENTRAPIM_DISABLE_UPDATE_CHECK environment variable
+
 ## 2.1.0
 - Added Configure-EntraPIM command for persistent configuration via environment variables
 - Added Clear-EntraPIMConfig command to remove saved configuration

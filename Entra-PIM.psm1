@@ -227,6 +227,151 @@ function Clear-EntraPIMConfig {
     }
 }
 
+function Show-UpdateNotification {
+    <#
+    .SYNOPSIS
+        Displays the update notification message.
+
+    .DESCRIPTION
+        Shows a formatted notification when a newer version of Entra-PIM
+        is available on PowerShell Gallery.
+
+    .PARAMETER CurrentVersion
+        The currently installed version.
+
+    .PARAMETER LatestVersion
+        The latest version available on PowerShell Gallery.
+
+    .EXAMPLE
+        Show-UpdateNotification -CurrentVersion "2.1.0" -LatestVersion "2.2.0"
+    #>
+    [CmdletBinding()]
+    param(
+        [Parameter(Mandatory)]
+        [version]$CurrentVersion,
+
+        [Parameter(Mandatory)]
+        [version]$LatestVersion
+    )
+
+    Write-Host "[!] Entra-PIM update available: $CurrentVersion -> $LatestVersion | Run: Update-Module -Name Entra-PIM" -ForegroundColor Red
+}
+
+function Test-EntraPIMUpdate {
+    <#
+    .SYNOPSIS
+        Checks if a newer version of Entra-PIM is available on PowerShell Gallery.
+
+    .DESCRIPTION
+        Performs a non-intrusive check for updates once per 24 hours.
+        Uses cached results to avoid excessive API calls.
+        Silently handles all errors to not interrupt user experience.
+
+    .EXAMPLE
+        Test-EntraPIMUpdate
+    #>
+    [CmdletBinding()]
+    param()
+
+    try {
+        # Allow users to disable update checks via environment variable
+        if ($env:ENTRAPIM_DISABLE_UPDATE_CHECK -eq 'true') {
+            return
+        }
+
+        # Get current module version
+        $currentModule = Get-Module -Name Entra-PIM -ListAvailable |
+            Sort-Object Version -Descending |
+            Select-Object -First 1
+
+        if (-not $currentModule) {
+            # Module not properly installed, skip check
+            return
+        }
+
+        $currentVersion = $currentModule.Version
+
+        # Setup cache file path (cross-platform)
+        $tempPath = [System.IO.Path]::GetTempPath()
+        $cacheFile = Join-Path $tempPath "EntraPIM_UpdateCheck.json"
+
+        # Check if we have valid cached data
+        $shouldCheck = $true
+        if (Test-Path $cacheFile) {
+            try {
+                $cache = Get-Content $cacheFile -Raw -ErrorAction Stop | ConvertFrom-Json
+
+                # Validate cache structure
+                if ($cache.LastCheckTime -and $cache.LatestVersion -and $cache.CurrentVersion) {
+                    $lastCheck = [DateTime]::Parse($cache.LastCheckTime)
+                    $hoursSinceCheck = ((Get-Date) - $lastCheck).TotalHours
+
+                    # Use cache if less than 24 hours old
+                    if ($hoursSinceCheck -lt 24) {
+                        $shouldCheck = $false
+                        $latestVersion = [version]$cache.LatestVersion
+
+                        # Show notification if cached version indicates update available
+                        if ($currentVersion -lt $latestVersion) {
+                            Show-UpdateNotification -CurrentVersion $currentVersion -LatestVersion $latestVersion
+                        }
+                    }
+                }
+            } catch {
+                # Cache corrupt or invalid - delete and proceed with check
+                Remove-Item $cacheFile -ErrorAction SilentlyContinue
+                $shouldCheck = $true
+            }
+        }
+
+        # Perform actual version check if needed
+        if ($shouldCheck) {
+            try {
+                # Fast method using URL redirect
+                $url = "https://www.powershellgallery.com/packages/Entra-PIM"
+                $response = Invoke-WebRequest -Uri $url -UseBasicParsing -MaximumRedirection 0 -TimeoutSec 5 -ErrorAction Stop
+
+                # Extract version from redirect location
+                $versionString = Split-Path -Path $response.Headers.Location -Leaf
+                $latestVersion = [version]$versionString
+
+                # Update cache
+                $cacheData = @{
+                    LastCheckTime = (Get-Date).ToString('o')  # ISO 8601 format
+                    LatestVersion = $latestVersion.ToString()
+                    CurrentVersion = $currentVersion.ToString()
+                }
+
+                try {
+                    $cacheData | ConvertTo-Json | Set-Content $cacheFile -ErrorAction Stop
+                } catch {
+                    # Can't write cache - not critical, continue anyway
+                }
+
+                # Show notification if update available
+                if ($currentVersion -lt $latestVersion) {
+                    Show-UpdateNotification -CurrentVersion $currentVersion -LatestVersion $latestVersion
+                }
+
+            } catch {
+                # Network error, API down, timeout, etc.
+                # Silently fail - don't interrupt user experience
+                # This could be:
+                # - No internet connection
+                # - PowerShell Gallery API down
+                # - Firewall blocking request
+                # - Timeout exceeded
+                return
+            }
+        }
+
+    } catch {
+        # Any unexpected error - silently fail
+        # The update check feature should never break the module
+        return
+    }
+}
+
 function Start-EntraPIM {
     <#
     .SYNOPSIS
@@ -275,5 +420,10 @@ function Start-EntraPIM {
     $scriptPath = Join-Path $PSScriptRoot "Entra-PIM.ps1"
     & $scriptPath -ClientId $ClientId -TenantId $TenantId
 }
+
+# ========================= Version Check =========================
+# Check for updates once per session (runs at module import)
+# Runs synchronously but with 5-second timeout protection
+Test-EntraPIMUpdate
 
 Export-ModuleMember -Function 'Start-EntraPIM', 'Configure-EntraPIM', 'Clear-EntraPIMConfig', 'Get-EntraPIMHelp'
