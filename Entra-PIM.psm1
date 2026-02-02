@@ -254,7 +254,58 @@ function Show-UpdateNotification {
         [version]$LatestVersion
     )
 
-    Write-Host "[!] Entra-PIM update available: $CurrentVersion -> $LatestVersion | Run: Update-Module -Name Entra-PIM" -ForegroundColor Red
+    Write-Host ""
+    Write-Host "[!] Entra-PIM update available: $CurrentVersion -> $LatestVersion" -ForegroundColor Red
+    Write-Host ""
+
+    $response = Read-Host "Update now? (Y/N) [Press Enter to skip]"
+
+    if ($response -eq 'Y' -or $response -eq 'y') {
+        Write-Host ""
+        Write-Host "Updating Entra-PIM..." -ForegroundColor Cyan
+
+        try {
+            # Try Update-PSResource first (newer method)
+            if (Get-Command Update-PSResource -ErrorAction SilentlyContinue) {
+                Update-PSResource -Name Entra-PIM -Confirm:$false
+            }
+            # Fallback to Update-Module
+            elseif (Get-Command Update-Module -ErrorAction SilentlyContinue) {
+                Update-Module -Name Entra-PIM -Force
+            }
+            else {
+                Write-Host "Update commands not found. Please run manually:" -ForegroundColor Yellow
+                Write-Host "  Update-Module -Name Entra-PIM" -ForegroundColor Yellow
+                Write-Host ""
+                Write-Host "Press Enter to continue"
+                $null = [Console]::ReadLine()
+                return
+            }
+
+            Write-Host ""
+            Write-Host "Update complete! Please restart PowerShell and run Start-EntraPIM again." -ForegroundColor Green
+            Write-Host ""
+            Write-Host "Press Enter to Exit"
+            $null = [Console]::ReadLine()
+            exit
+        }
+        catch {
+            Write-Host ""
+            Write-Host "Update failed: $_" -ForegroundColor Red
+            Write-Host "Please update manually with: Update-Module -Name Entra-PIM" -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "Press Enter to continue anyway"
+            $null = [Console]::ReadLine()
+        }
+    }
+    elseif ($response -eq 'N' -or $response -eq 'n') {
+        Write-Host "Skipping update." -ForegroundColor Yellow
+        Write-Host ""
+    }
+    else {
+        # Just continue
+        Write-Host ""
+    }
 }
 
 function Test-EntraPIMUpdate {
@@ -329,11 +380,35 @@ function Test-EntraPIMUpdate {
             try {
                 # Fast method using URL redirect
                 $url = "https://www.powershellgallery.com/packages/Entra-PIM"
-                $response = Invoke-WebRequest -Uri $url -UseBasicParsing -MaximumRedirection 0 -TimeoutSec 5 -ErrorAction Stop
+                $latestVersion = $null
 
-                # Extract version from redirect location
-                $versionString = Split-Path -Path $response.Headers.Location -Leaf
-                $latestVersion = [version]$versionString
+                try {
+                    $null = Invoke-WebRequest -Uri $url -UseBasicParsing -MaximumRedirection 0 -TimeoutSec 5 -ErrorAction Stop
+                } catch {
+                    # When MaximumRedirection is 0, a redirect throws an exception
+                    # Extract version from the redirect Location header in the exception
+                    if ($_.Exception.Response -and $_.Exception.Response.Headers) {
+                        try {
+                            $location = $_.Exception.Response.Headers.GetValues('Location') | Select-Object -First 1
+                            if ($location) {
+                                $versionString = Split-Path -Path $location -Leaf
+                                $latestVersion = [version]$versionString
+                            } else {
+                                return
+                            }
+                        } catch {
+                            # Can't get location header - silently fail
+                            return
+                        }
+                    } else {
+                        # Real error (not a redirect) - silently fail
+                        return
+                    }
+                }
+
+                if (-not $latestVersion) {
+                    return
+                }
 
                 # Update cache
                 $cacheData = @{
@@ -356,11 +431,6 @@ function Test-EntraPIMUpdate {
             } catch {
                 # Network error, API down, timeout, etc.
                 # Silently fail - don't interrupt user experience
-                # This could be:
-                # - No internet connection
-                # - PowerShell Gallery API down
-                # - Firewall blocking request
-                # - Timeout exceeded
                 return
             }
         }
@@ -408,6 +478,9 @@ function Start-EntraPIM {
         [string]$TenantId
     )
 
+    # Check for module updates
+    Test-EntraPIMUpdate
+
     # Check for environment variables if parameters not provided
     if ([string]::IsNullOrWhiteSpace($ClientId)) {
         $ClientId = $env:ENTRAPIM_CLIENTID
@@ -420,10 +493,5 @@ function Start-EntraPIM {
     $scriptPath = Join-Path $PSScriptRoot "Entra-PIM.ps1"
     & $scriptPath -ClientId $ClientId -TenantId $TenantId
 }
-
-# ========================= Version Check =========================
-# Check for updates once per session (runs at module import)
-# Runs synchronously but with 5-second timeout protection
-Test-EntraPIMUpdate
 
 Export-ModuleMember -Function 'Start-EntraPIM', 'Configure-EntraPIM', 'Clear-EntraPIMConfig', 'Get-EntraPIMHelp'
