@@ -58,6 +58,21 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+## 2.2.4
+- Development version for testing update notifications
+
+## 2.2.3
+- Fixed update notification version detection - now properly extracts version from PowerShell Gallery redirect headers
+- Update notifications now work correctly for all users
+
+## 2.2.2
+- Test release for update notification functionality
+
+## 2.2.1
+- Interactive update prompt - users can now update immediately when prompted (Y/N/Enter)
+- Auto-update on confirmation with automatic module reload
+- Improved user experience with "Press Enter to Exit" prompts (no colon)
+
 ## 2.2.0
 - Added automatic update notifications - checks PowerShell Gallery once per 24 hours
 - Inline red notification when newer version is available
