@@ -1983,7 +1983,7 @@ function Show-PIMGlobalHeader {
                 directoryScopeId = $role.DirectoryScopeId
                 justification = $justification
                 scheduleInfo = @{
-                    startDateTime = (Get-Date).ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+                    startDateTime = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
                     expiration = @{
                         type = "afterDuration"
                         duration = $duration
