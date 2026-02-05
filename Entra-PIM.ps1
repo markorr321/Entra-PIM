@@ -528,7 +528,7 @@ function Get-ActiveRolesOptimized {
             if ($roleDefinition) {
                 $expirationTime = $null
                 if ($instance.endDateTime) {
-                    $expirationTime = [DateTime]::Parse($instance.endDateTime).ToLocalTime()
+                    $expirationTime = [DateTime]::Parse($instance.endDateTime, [System.Globalization.CultureInfo]::InvariantCulture).ToLocalTime()
                 }
                 
                 $activeRoles += [PSCustomObject]@{
@@ -613,7 +613,7 @@ function Get-EligibleRolesOptimized {
         if ($activatedAssignments -and $activatedAssignments.Count -gt 0) {
             $currentTime = Get-Date
             $activeRoleIds = $activatedAssignments | Where-Object {
-                $null -ne $_.endDateTime -and [DateTime]::Parse($_.endDateTime) -gt $currentTime
+                $null -ne $_.endDateTime -and [DateTime]::Parse($_.endDateTime, [System.Globalization.CultureInfo]::InvariantCulture) -gt $currentTime
             } | Select-Object -ExpandProperty roleDefinitionId -Unique
         }
         
@@ -935,7 +935,7 @@ function Start-RoleDeactivationWorkflowWithCheck {
             
             # Use individual activation time from API
             if ($assignment.StartDateTime) {
-                $activationTime = [DateTime]::Parse($assignment.StartDateTime).ToLocalTime()
+                $activationTime = [DateTime]::Parse($assignment.StartDateTime, [System.Globalization.CultureInfo]::InvariantCulture).ToLocalTime()
             }
             
             if ($activationTime) {
@@ -2405,7 +2405,7 @@ function Show-PIMGlobalHeader {
                 $schedule = $roleSchedules | Sort-Object CreatedDateTime -Descending | Select-Object -First 1
                 
                 if ($schedule.ScheduleInfo.Expiration.EndDateTime) {
-                    $expirationTime = [DateTime]::Parse($schedule.ScheduleInfo.Expiration.EndDateTime).ToLocalTime()
+                    $expirationTime = [DateTime]::Parse($schedule.ScheduleInfo.Expiration.EndDateTime, [System.Globalization.CultureInfo]::InvariantCulture).ToLocalTime()
                     
                     [PSCustomObject]@{
                         RoleName = $entry.RoleName
@@ -3348,7 +3348,34 @@ function Start-RoleDeactivationWorkflow {
     }
         [Console]::CursorVisible = $false
         if ($ActiveRoles.Count -eq 0) {
-            Write-Host "❌ No active roles available for deactivation." -ForegroundColor Red
+            Write-Host ""
+            Write-Host "ℹ️  No active roles to deactivate at this time." -ForegroundColor Gray
+            Write-Host ""
+            
+            # Ask if user wants to activate roles instead
+            $response = Read-PIMInput -Prompt "Would you like to activate roles instead? (Y/N)" -ForegroundColor Cyan
+            
+            if ($response) {
+                $userInput = $response.Trim().ToUpper()
+                if ($userInput -eq "Y" -or $userInput -eq "YES") {
+                    Clear-Host
+                    Show-PIMGlobalHeaderMinimal
+                    Write-Host ""
+                    Write-Host "🔄 Loading eligible roles..." -ForegroundColor Cyan -NoNewline
+                    $eligibleRoles = Get-EligibleRolesOptimized -CurrentUserId $CurrentUserId
+                    if ($eligibleRoles.Count -gt 0) {
+                        Write-Host " ✅ $($eligibleRoles.Count) found" -ForegroundColor Green
+                        Start-RoleActivationWorkflow -ValidRoles $eligibleRoles -CurrentUserId $CurrentUserId
+                    } else {
+                        Write-Host ""
+                        Write-Host ""
+                        Write-Host "❌ No eligible roles available for activation." -ForegroundColor Red
+                        Write-Host ""
+                        Write-Host "Press Enter to exit..." -ForegroundColor Yellow
+                        Read-Host
+                    }
+                }
+            }
             return
         }  
     # Check for roles that are too new to deactivate (5-minute rule)
@@ -3363,7 +3390,7 @@ function Start-RoleDeactivationWorkflow {
             
             # Use individual activation time from API (same approach as Start-RoleDeactivationWorkflowWithCheck)
             if ($assignment.StartDateTime) {
-                $activationTime = [DateTime]::Parse($assignment.StartDateTime).ToLocalTime()
+                $activationTime = [DateTime]::Parse($assignment.StartDateTime, [System.Globalization.CultureInfo]::InvariantCulture).ToLocalTime()
             }
             
             if ($activationTime) {
@@ -3530,7 +3557,7 @@ function Start-RoleDeactivationWorkflow {
             $schedule = $schedules | Sort-Object CreatedDateTime -Descending | Select-Object -First 1
             
             if ($schedule.ScheduleInfo.Expiration.EndDateTime) {
-                $expirationTime = [DateTime]::Parse($schedule.ScheduleInfo.Expiration.EndDateTime).ToLocalTime()
+                $expirationTime = [DateTime]::Parse($schedule.ScheduleInfo.Expiration.EndDateTime, [System.Globalization.CultureInfo]::InvariantCulture).ToLocalTime()
                 $roleExpirationData += [PSCustomObject]@{
                     RoleName = $role.RoleName
                     ExpirationTime = $expirationTime
@@ -3570,7 +3597,7 @@ function Start-RoleDeactivationWorkflow {
                 $scheduleInstance = $scheduleInstanceLookup[$assignment.RoleDefinitionId]
                 
                 if ($scheduleInstance -and $scheduleInstance.EndDateTime) {
-                    $expirationTime = [DateTime]::Parse($scheduleInstance.EndDateTime).ToLocalTime()
+                    $expirationTime = [DateTime]::Parse($scheduleInstance.EndDateTime, [System.Globalization.CultureInfo]::InvariantCulture).ToLocalTime()
                     $timeRemaining = $expirationTime - (Get-Date)
                     
                     
@@ -3599,7 +3626,7 @@ function Start-RoleDeactivationWorkflow {
                     $schedule = $schedules | Sort-Object CreatedDateTime -Descending | Select-Object -First 1
                     
                     if ($schedule.ScheduleInfo.Expiration.EndDateTime) {
-                        $expirationTime = [DateTime]::Parse($schedule.ScheduleInfo.Expiration.EndDateTime).ToLocalTime()
+                        $expirationTime = [DateTime]::Parse($schedule.ScheduleInfo.Expiration.EndDateTime, [System.Globalization.CultureInfo]::InvariantCulture).ToLocalTime()
                         $timeRemaining = $expirationTime - (Get-Date)
                         
                         if ($timeRemaining.TotalSeconds -gt 0) {
@@ -4744,7 +4771,7 @@ function Start-AzureRoleDeactivation {
     foreach ($role in $ActiveRoles) {
         try {
             if ($role.StartDateTime) {
-                $activationTime = [DateTime]::Parse($role.StartDateTime).ToLocalTime()
+                $activationTime = [DateTime]::Parse($role.StartDateTime, [System.Globalization.CultureInfo]::InvariantCulture).ToLocalTime()
                 $timeSinceActivation = (Get-Date) - $activationTime
 
                 if ($timeSinceActivation.TotalMinutes -lt 5) {
