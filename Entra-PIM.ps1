@@ -231,9 +231,10 @@ public class PIMBrowserAuth
             .WithRedirectUri("http://localhost");
 
         // Add tenant ID if provided (for dedicated app registrations)
+        // This enforces the tenant at the authority level
         if (!string.IsNullOrEmpty(tenantId))
         {
-            builder = builder.WithAuthority(AzureCloudInstance.AzurePublic, tenantId);
+            builder = builder.WithAuthority($"https://login.microsoftonline.com/{tenantId}");
         }
 
         IPublicClientApplication publicClientApp = builder.Build();
@@ -241,9 +242,15 @@ public class PIMBrowserAuth
         using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(180)))
         {
             var tokenBuilder = publicClientApp.AcquireTokenInteractive(scopes)
-                .WithPrompt(Prompt.ForceLogin)
+                .WithPrompt(Prompt.SelectAccount)
                 .WithUseEmbeddedWebView(false)
                 .WithSystemWebViewOptions(new SystemWebViewOptions());
+            
+            // Add extra query parameters to hint at the tenant
+            if (!string.IsNullOrEmpty(tenantId))
+            {
+                tokenBuilder = tokenBuilder.WithExtraQueryParameters($"domain_hint={tenantId}");
+            }
 
             // Add claims challenge if provided (for Conditional Access step-up)
             if (!string.IsNullOrEmpty(claims))
@@ -613,7 +620,7 @@ function Get-EligibleRolesOptimized {
         if ($activatedAssignments -and $activatedAssignments.Count -gt 0) {
             $currentTime = Get-Date
             $activeRoleIds = $activatedAssignments | Where-Object {
-                $null -ne $_.endDateTime -and [DateTime]::Parse($_.endDateTime, [System.Globalization.CultureInfo]::InvariantCulture) -gt $currentTime
+                $null -ne $_.endDateTime -and [DateTime]::Parse($_.endDateTime, [System.Globalization.CultureInfo]::InvariantCulture).ToLocalTime() -gt $currentTime
             } | Select-Object -ExpandProperty roleDefinitionId -Unique
         }
         
@@ -1934,10 +1941,8 @@ function Show-PIMGlobalHeader {
             } while ([string]::IsNullOrWhiteSpace($durationInput) -or $durationInput -notmatch '^\d+[HM]')
             
             # Convert duration to ISO 8601 format and validate minimum 5 minutes
-            $dur = $durationInput.ToUpper()
-            $duration = "PT"
-            if ($dur -match '(\d+)H') { $duration += "$($Matches[1])H" }
-            if ($dur -match '(\d+)M') { $duration += "$($Matches[1])M" }
+            $duration = $durationInput.ToUpper() -replace '(\d+)H', 'PT${1}H' -replace '(\d+)M', '${1}M'
+            if ($duration -match '^\d+M$') { $duration = "PT$duration" }
             
             # Parse duration to check if it's less than 5 minutes
             $totalMinutes = 0
@@ -2194,16 +2199,147 @@ function Show-PIMGlobalHeader {
             [Console]::SetCursorPosition(0, $Line)
             Write-Host $NewContent.PadRight([Console]::WindowWidth - 1) -ForegroundColor $Color
             $global:LastUIState[$Key] = $NewContent
+            Add-PerformanceMetric -Type "UIUpdates"
             return $true  # Changed
         }
+        Add-PerformanceMetric -Type "UISkipped"
         return $false  # No change
     }
     
-    function Get-RoleSchedules {
+    # Advanced: Memory optimization
+    function Optimize-Memory {
+        # Force garbage collection for better performance
+        [System.GC]::Collect()
+        [System.GC]::WaitForPendingFinalizers()
+        
+        # Clear time format cache if it gets too large
+        if ($global:TimeFormatCache.Count -gt 500) {
+            $global:TimeFormatCache.Clear()
+        }
+        
+        # Clear UI state cache periodically
+        if ($global:LastUIState.Count -gt 100) {
+            $global:LastUIState.Clear()
+        }
+    }
+    
+    # Advanced: Async operations for background processing
+    function Start-AsyncOperation {
+        param(
+            [scriptblock]$Operation,
+            [string]$Name = "AsyncOp",
+            [hashtable]$Parameters = @{}
+        )
+        
+        # PowerShell 7+ job-based async simulation
+        $job = Start-Job -ScriptBlock $Operation -ArgumentList $Parameters -Name $Name
+        return $job
+    }
+    
+    # Advanced: Predictive caching based on usage patterns
+    $global:AccessPatterns = @{}
+    $global:PredictiveCache = @{}
+    
+    function Update-DataAccessPattern {
+        param([string]$Key, [string]$Operation = "read")
+        
+        if (-not $global:AccessPatterns.ContainsKey($Key)) {
+            $global:AccessPatterns[$Key] = @{
+                Count = 0
+                LastAccessed = Get-Date
+                AccessTimes = @()
+                Operations = @()
+            }
+        }
+        
+        $pattern = $global:AccessPatterns[$Key]
+        $pattern.Count++
+        $pattern.LastAccessed = Get-Date
+        $pattern.AccessTimes += Get-Date
+        $pattern.Operations += $Operation
+        
+        # Keep only last 10 access times to prevent memory bloat
+        if ($pattern.AccessTimes.Count -gt 10) {
+            $pattern.AccessTimes = $pattern.AccessTimes[-10..-1]
+            $pattern.Operations = $pattern.Operations[-10..-1]
+        }
+    }
+    
+    function Get-PredictiveCacheKeys {
+        # Return keys that are likely to be accessed soon based on patterns
+        $hotKeys = $global:AccessPatterns.Keys | Where-Object {
+            $pattern = $global:AccessPatterns[$_]
+            $pattern.Count -gt 2 -and
+            ((Get-Date) - $pattern.LastAccessed).TotalMinutes -lt 15
+        } | Sort-Object { $global:AccessPatterns[$_].Count } -Descending
+        
+        return $hotKeys | Select-Object -First 5
+    }
+    
+    function Start-PredictivePreload {
+        # Background job to preload likely-needed data
+        $predictiveKeys = Get-PredictiveCacheKeys
+        
+        foreach ($key in $predictiveKeys) {
+            if (-not $global:PredictiveCache.ContainsKey($key)) {
+                # Start async preload based on key pattern
+                if ($key -match "schedule") {
+                    $job = Start-AsyncOperation -Name "Preload_$key" -Operation {
+                        # Preload schedule data
+                        try {
+                            Get-MgRoleManagementDirectoryRoleAssignmentSchedule -All | Select-Object -First 50
+                        } catch { $null }
+                    }
+                    $global:PredictiveCache[$key] = @{ Job = $job; StartTime = Get-Date }
+                }
+            }
+        }
+        
+        # Clean up old preload jobs
+        $expiredKeys = $global:PredictiveCache.Keys | Where-Object {
+            ((Get-Date) - $global:PredictiveCache[$_].StartTime).TotalMinutes -gt 5
+        }
+        foreach ($key in $expiredKeys) {
+            if ($global:PredictiveCache[$key].Job) {
+                Stop-Job $global:PredictiveCache[$key].Job -ErrorAction SilentlyContinue
+                Remove-Job $global:PredictiveCache[$key].Job -ErrorAction SilentlyContinue
+            }
+            $global:PredictiveCache.Remove($key)
+        }
+    }
+    
+    # Advanced: Performance monitoring and metrics
+    $global:PerformanceMetrics = @{
+        APICallCount = 0
+        CacheHits = 0
+        CacheMisses = 0
+        BatchedCalls = 0
+        IndividualCalls = 0
+        StartTime = Get-Date
+        UIUpdates = 0
+        UISkipped = 0
+    }
+    
+    function Add-PerformanceMetric {
+        param([string]$Type, [int]$Count = 1)
+        
+        if ($global:PerformanceMetrics.ContainsKey($Type)) {
+            $global:PerformanceMetrics[$Type] += $Count
+        }
+    }
+    
+    function Get-CachedSchedules {
         param([string]$CurrentUserId)
-
+        
+        Update-DataAccessPattern -Key "schedules" -Operation "read"
+        
+        # FORCE FRESH DATA - NO CACHING
+        Add-PerformanceMetric -Type "CacheMisses"
+        
+        # Always fetch fresh data - no cache check - MATCH PROGRESS.PS1 EXACTLY
         try {
-            # Get schedule requests (for activation timestamps) instead of just schedules
+            Add-PerformanceMetric -Type "APICallCount"
+            # Get schedule requests (for activation timestamps) instead of just schedules - OPTIMIZED
             $freshSchedules = Get-MgRoleManagementDirectoryRoleAssignmentScheduleRequest -Filter "PrincipalId eq '$CurrentUserId'" -Top 50
             
             # Return fresh data without caching
@@ -2247,7 +2383,7 @@ function Show-PIMGlobalHeader {
         $currentIndex = 0
         
         # Get cached schedules once
-        $cachedSchedules = Get-RoleSchedules -CurrentUserId $currentUserId
+        $cachedSchedules = Get-CachedSchedules -CurrentUserId $currentUserId
         
         # ULTRA AGGRESSIVE DEDUPLICATION: Force only ONE entry per role name at input level
         $uniqueActiveRoles = @()
@@ -2494,7 +2630,13 @@ function Show-PIMGlobalHeader {
                 
                 # Optimized delay to prevent excessive CPU usage
                 Start-Sleep -Milliseconds 250
-
+                
+                # Periodic memory optimization and predictive preload (every ~40 seconds)
+                if ((Get-Random -Maximum 160) -eq 1) {
+                    Optimize-Memory
+                    Start-PredictivePreload
+                }
+                
         } while ($true)
         }
         finally {
@@ -3207,7 +3349,7 @@ function Start-RoleDeactivationWorkflow {
     
     # Get cached schedules for activation time checking
     try {
-        $cachedSchedules = Get-RoleSchedules -CurrentUserId $CurrentUserId
+        $cachedSchedules = Get-CachedSchedules -CurrentUserId $CurrentUserId
     } catch {
         $cachedSchedules = @()
     }
@@ -3483,7 +3625,7 @@ function Start-RoleDeactivationWorkflow {
                     }
                 } else {
                     # Try alternative approach using cached schedules
-                    $cachedSchedules = Get-RoleSchedules -CurrentUserId $CurrentUserId
+                    $cachedSchedules = Get-CachedSchedules -CurrentUserId $CurrentUserId
                     $schedules = $cachedSchedules | Where-Object { 
                         $_.PrincipalId -eq $assignment.PrincipalId -and 
                         $_.RoleDefinitionId -eq $assignment.RoleDefinitionId 
@@ -3843,12 +3985,7 @@ function Start-AzureRoleActivation {
         $response = Invoke-AzurePIMApi -Path $path -Method "PUT" -Body $body
         return ($null -ne $response)
     } catch {
-        $errorMsg = $_.Exception.Message
-        if ($errorMsg -like "*RoleAssignmentExists*") {
-            Write-Host "  ⚠️ Skipped - role is already active" -ForegroundColor Yellow
-        } else {
-            Write-Host "  ❌ Failed: $errorMsg" -ForegroundColor Red
-        }
+        Write-Host "  ❌ Failed: $($_.Exception.Message)" -ForegroundColor Red
         return $false
     }
 }
@@ -4806,10 +4943,8 @@ function Show-AzureActivationWizard {
     } while ([string]::IsNullOrWhiteSpace($durationInput) -or $durationInput -notmatch '^\d+[HM]')
 
     # Convert duration to ISO 8601 format
-    $dur = $durationInput.ToUpper()
-    $duration = "PT"
-    if ($dur -match '(\d+)H') { $duration += "$($Matches[1])H" }
-    if ($dur -match '(\d+)M') { $duration += "$($Matches[1])M" }
+    $duration = $durationInput.ToUpper() -replace '(\d+)H', 'PT${1}H' -replace '(\d+)M', '${1}M'
+    if ($duration -match '^\d+M$') { $duration = "PT$duration" }
 
     # Parse duration to check if it's less than 5 minutes
     $totalMinutes = 0
