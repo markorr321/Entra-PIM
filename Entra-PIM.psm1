@@ -265,17 +265,38 @@ function Show-UpdateNotification {
         Write-Host "Updating Entra-PIM..." -ForegroundColor Cyan
 
         try {
-            # Try Update-PSResource first (newer method)
-            if (Get-Command Update-PSResource -ErrorAction SilentlyContinue) {
-                Update-PSResource -Name Entra-PIM -Confirm:$false
+            # Detect how the module was installed and use matching update command
+            $installedViaPSResource = $null
+            $installedViaPowerShellGet = $null
+            
+            # Check PSResourceGet first
+            if (Get-Command Get-InstalledPSResource -ErrorAction SilentlyContinue) {
+                $installedViaPSResource = Get-InstalledPSResource -Name Entra-PIM -ErrorAction SilentlyContinue
             }
-            # Fallback to Update-Module
+            
+            # Check PowerShellGet
+            if (Get-Command Get-InstalledModule -ErrorAction SilentlyContinue) {
+                $installedViaPowerShellGet = Get-InstalledModule -Name Entra-PIM -ErrorAction SilentlyContinue
+            }
+            
+            if ($installedViaPSResource) {
+                # Installed via PSResourceGet - detect scope from installation path
+                $installPath = $installedViaPSResource.InstalledLocation
+                # AllUsers paths: Windows="Program Files", macOS/Linux="/usr/local"
+                $scope = if ($installPath -match 'Program Files|/usr/local') { 'AllUsers' } else { 'CurrentUser' }
+                Update-PSResource -Name Entra-PIM -Scope $scope -Confirm:$false
+            }
+            elseif ($installedViaPowerShellGet) {
+                # Installed via PowerShellGet, use Update-Module
+                Update-Module -Name Entra-PIM -Force
+            }
             elseif (Get-Command Update-Module -ErrorAction SilentlyContinue) {
+                # Fallback to Update-Module if we can't detect installation method
                 Update-Module -Name Entra-PIM -Force
             }
             else {
                 Write-Host "Update commands not found. Please run manually:" -ForegroundColor Yellow
-                Write-Host "  Update-Module -Name Entra-PIM" -ForegroundColor Yellow
+                Write-Host "  Install-Module -Name Entra-PIM -Force" -ForegroundColor Yellow
                 Write-Host ""
                 Write-Host "Press Enter to continue"
                 $null = [Console]::ReadLine()
@@ -292,7 +313,9 @@ function Show-UpdateNotification {
         catch {
             Write-Host ""
             Write-Host "Update failed: $_" -ForegroundColor Red
-            Write-Host "Please update manually with: Update-Module -Name Entra-PIM" -ForegroundColor Yellow
+            Write-Host "Please update manually with:" -ForegroundColor Yellow
+            Write-Host "  Update-Module -Name Entra-PIM      (if installed via Install-Module)" -ForegroundColor Yellow
+            Write-Host "  Update-PSResource -Name Entra-PIM  (if installed via Install-PSResource)" -ForegroundColor Yellow
             Write-Host ""
             Write-Host "Press Enter to continue anyway"
             $null = [Console]::ReadLine()

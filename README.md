@@ -32,6 +32,20 @@ Install-Module -Name Entra-PIM -Repository PSGallery
 Install-PSResource -Name Entra-PIM -Repository PSGallery
 ```
 
+## Updating
+
+The module automatically checks for updates and prompts you when a new version is available. It detects your installation method (PowerShellGet or PSResourceGet) and uses the correct update command.
+
+To update manually:
+
+```powershell
+# If installed with Install-Module
+Update-Module -Name Entra-PIM
+
+# If installed with Install-PSResource
+Update-PSResource -Name Entra-PIM
+```
+
 ## Usage
 
 ```powershell
