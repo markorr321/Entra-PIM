@@ -189,7 +189,7 @@ function Initialize-MSALHelper {
     }
 
     # Add standard assemblies
-    $referencedAssemblies += @("netstandard", "System.Linq", "System.Threading.Tasks")
+    $referencedAssemblies += @("netstandard", "System.Linq", "System.Threading.Tasks", "System.Collections")
 
     # C# code for browser-based authentication (no WAM)
     $code = @"
