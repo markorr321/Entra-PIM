@@ -6,7 +6,7 @@
     RootModule = 'Entra-PIM.psm1'
 
     # Version number of this module (SemVer format for PSResourceGet)
-    ModuleVersion = '2.2.7'
+    ModuleVersion = '2.2.8'
 
     # ID used to uniquely identify this module
     GUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
@@ -58,6 +58,11 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+## 2.2.8
+- Fixed Azure PIM group-based role activation (uses user OID from JWT token)
+- Consistent activation/deactivation UI messages between Entra and Azure workflows
+- Simplified exit handling (disconnect only, no terminal close attempts)
+
 ## 2.2.4
 - Development version for testing update notifications
 
