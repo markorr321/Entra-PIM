@@ -1567,17 +1567,7 @@ function Show-PIMGlobalHeader {
         }
 
         Write-Host ""
-        Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
-        Start-Sleep -Seconds 2
-
-        if ($script:IsRunningOnMac) {
-            # Close the terminal window to avoid session save messages
-            & osascript -e 'tell application "Terminal" to close first window' 2>$null
-            Start-Sleep -Milliseconds 500
-        }
-
-        # Exit gracefully
-        [Environment]::Exit(0)
+        exit 0
     }
 
     # Centralized key handler for common shortcuts
@@ -3967,7 +3957,7 @@ function Start-AzureRoleActivation {
 
         $body = @{
             properties = @{
-                principalId      = $EligibleRole.PrincipalId
+                principalId      = $script:AzureCurrentUserId  # Use current user's Object ID (handles group-based eligibility)
                 roleDefinitionId = $EligibleRole.RoleDefinitionId
                 requestType      = "SelfActivate"
                 justification    = $Justification
@@ -3983,10 +3973,14 @@ function Start-AzureRoleActivation {
         }
 
         $response = Invoke-AzurePIMApi -Path $path -Method "PUT" -Body $body
-        return ($null -ne $response)
+        return @{ Success = $true; Error = $null }
     } catch {
-        Write-Host "  ❌ Failed: $($_.Exception.Message)" -ForegroundColor Red
-        return $false
+        $errorMsg = $_.Exception.Message
+        # Provide friendlier message for common errors
+        if ($errorMsg -match "already exists") {
+            $errorMsg = "Already active (Azure API may take a few minutes to sync)"
+        }
+        return @{ Success = $false; Error = $errorMsg }
     }
 }
 
@@ -4005,17 +3999,21 @@ function Stop-AzureRoleActivation {
 
         $body = @{
             properties = @{
-                principalId      = $ActiveRole.PrincipalId
+                principalId      = $script:AzureCurrentUserId  # Use current user's Object ID (handles group-based eligibility)
                 roleDefinitionId = $ActiveRole.RoleDefinitionId
                 requestType      = "SelfDeactivate"
             }
         }
 
         $response = Invoke-AzurePIMApi -Path $path -Method "PUT" -Body $body
-        return ($null -ne $response)
+        return @{ Success = $true; Error = $null }
     } catch {
-        Write-Host "  ❌ Failed: $($_.Exception.Message)" -ForegroundColor Red
-        return $false
+        $errorMsg = $_.Exception.Message
+        # Provide friendlier message for common errors
+        if ($errorMsg -match "does not exist|not found") {
+            $errorMsg = "Role already deactivated"
+        }
+        return @{ Success = $false; Error = $errorMsg }
     }
 }
 
@@ -4088,7 +4086,7 @@ function Start-AzurePIMWorkflow {
             throw "Failed to acquire access token"
         }
 
-        # Decode JWT to get account ID and tenant ID
+        # Decode JWT to get account ID, tenant ID, and user Object ID
         $tokenParts = $accessToken.Split('.')
         $payload = $tokenParts[1]
         # Add padding if needed
@@ -4098,6 +4096,8 @@ function Start-AzurePIMWorkflow {
         $claims = $decodedPayload | ConvertFrom-Json
         $accountId = if ($claims.upn) { $claims.upn } elseif ($claims.preferred_username) { $claims.preferred_username } else { $claims.sub }
         $tenantId = $claims.tid
+        # Store user Object ID for use in PIM role activation (required for group-based eligible assignments)
+        $script:AzureCurrentUserId = $claims.oid
 
         # Connect to Azure using the MSAL token (without SkipValidation to avoid needing subscription)
         $null = Connect-AzAccount -AccessToken $accessToken -AccountId $accountId -Tenant $tenantId -ErrorAction Stop
@@ -4202,8 +4202,12 @@ function Start-AzurePIMWorkflow {
         return
     }
 
-    # Main Azure PIM loop - using same UI pattern as Entra
-    $script:AzureCurrentUserId = (Get-AzContext).Account.Id
+    # User Object ID should already be set during token decode at connection time
+    # Fallback to context Account.Id if not set (may be UPN instead of Object ID)
+    if ([string]::IsNullOrEmpty($script:AzureCurrentUserId)) {
+        $script:AzureCurrentUserId = (Get-AzContext).Account.Id
+    }
+
     Start-AzurePIMRoleManagement
 }
 
@@ -4228,18 +4232,7 @@ function Invoke-AzurePIMExit {
     }
 
     Write-Host ""
-    Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
-    Start-Sleep -Seconds 2
-
-    if ($script:IsRunningOnMac) {
-        # Kill the terminal window directly to avoid session save messages
-        & osascript -e 'tell application "Terminal" to close first window' 2>$null
-        Start-Sleep -Milliseconds 500
-        # If still running (e.g., iTerm2 or osascript failed), force kill this process
-        Stop-Process -Id $PID -Force 2>$null
-    }
-
-    [Environment]::Exit(0)
+    exit 0
 }
 
 function Show-AzureCheckboxMenu {
@@ -4860,22 +4853,23 @@ function Start-AzureRoleDeactivation {
     $failCount = 0
 
     foreach ($role in $rolesToDeactivate) {
-        Write-Host "  Deactivating $($role.RoleDisplayName)..." -NoNewline -ForegroundColor Cyan
+        $roleName = $role.RoleDisplayName
         $result = Stop-AzureRoleActivation -ActiveRole $role
-        if ($result) {
-            Write-Host " ✓" -ForegroundColor Green
+        if ($result.Success) {
+            Write-Host "✅ Successfully deactivated: $roleName" -ForegroundColor Green
             $successCount++
         } else {
-            Write-Host " ✗" -ForegroundColor Red
+            Write-Host "❌ Failed to deactivate: $roleName - $($result.Error)" -ForegroundColor Red
             $failCount++
         }
     }
 
     Write-Host ""
-    if ($successCount -gt 0) {
-        Write-Host "✅ Successfully deactivated $successCount role(s)" -ForegroundColor Green
-    }
-    if ($failCount -gt 0) {
+    if ($successCount -gt 0 -and $failCount -eq 0) {
+        # No summary needed - individual messages are sufficient
+    } elseif ($successCount -gt 0 -and $failCount -gt 0) {
+        Write-Host "⚠️ Deactivated $successCount role(s), $failCount failed" -ForegroundColor Yellow
+    } elseif ($failCount -gt 0 -and $successCount -eq 0) {
         Write-Host "❌ Failed to deactivate $failCount role(s)" -ForegroundColor Red
     }
 
@@ -4976,22 +4970,22 @@ function Show-AzureActivationWizard {
 
     foreach ($role in $RolesToActivate) {
         $roleName = $role.RoleDisplayName
-        Write-Host "  Activating $roleName..." -NoNewline -ForegroundColor Cyan
         $result = Start-AzureRoleActivation -EligibleRole $role -Justification $justification -Duration $duration
-        if ($result) {
-            Write-Host " ✓" -ForegroundColor Green
+        if ($result.Success) {
+            Write-Host "✅ Role activation submitted for: $roleName" -ForegroundColor Green
             $successCount++
         } else {
-            Write-Host " ✗" -ForegroundColor Red
+            Write-Host "❌ Failed to activate: $roleName - $($result.Error)" -ForegroundColor Red
             $failCount++
         }
     }
 
     Write-Host ""
-    if ($successCount -gt 0) {
-        Write-Host "✅ Successfully activated $successCount role(s)" -ForegroundColor Green
-    }
-    if ($failCount -gt 0) {
+    if ($successCount -gt 0 -and $failCount -eq 0) {
+        # No summary needed - individual messages are sufficient
+    } elseif ($successCount -gt 0 -and $failCount -gt 0) {
+        Write-Host "⚠️ Activated $successCount role(s), $failCount failed" -ForegroundColor Yellow
+    } elseif ($failCount -gt 0 -and $successCount -eq 0) {
         Write-Host "❌ Failed to activate $failCount role(s)" -ForegroundColor Red
     }
 
@@ -5226,18 +5220,7 @@ function Invoke-GracefulExit {
     } catch { }
 
     Write-Host ""
-    Write-Host "Terminal will close in 2 seconds..." -ForegroundColor Yellow
-    Start-Sleep -Seconds 2
-
-    if ($script:IsRunningOnMac) {
-        # Kill the terminal window directly to avoid session save messages
-        & osascript -e 'tell application "Terminal" to close first window' 2>$null
-        Start-Sleep -Milliseconds 500
-        # If still running (e.g., iTerm2 or osascript failed), force kill this process
-        Stop-Process -Id $PID -Force 2>$null
-    }
-
-    [Environment]::Exit(0)
+    exit 0
 }
 
 # Install prerequisites before starting
