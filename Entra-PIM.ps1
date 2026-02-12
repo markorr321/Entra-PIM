@@ -338,6 +338,29 @@ function Get-BrowserAccessTokenWithClaims {
     return $accessToken
 }
 
+function Get-AzureBrowserAccessTokenWithClaims {
+    <#
+    .SYNOPSIS
+        Gets an Azure management access token with claims challenge for Conditional Access step-up authentication.
+    #>
+    param(
+        [string]$Claims
+    )
+
+    # Ensure MSAL helper is compiled
+    if (-not $script:MSALHelperCompiled) {
+        $null = Initialize-MSALHelper
+    }
+
+    # Azure PowerShell client ID and management scope
+    $clientId = "1950a258-227b-4e31-a9cf-717495945fc2"
+    $scopes = @("https://management.azure.com/.default")
+    $tenantId = $script:CustomTenantId  # May be null, which is fine
+
+    $accessToken = [PIMBrowserAuth]::GetAccessTokenWithClaims($clientId, $scopes, $Claims, $tenantId)
+    return $accessToken
+}
+
 # ========================= Browser Authentication =========================
 function Connect-MgGraphWithBrowser {
     param(
@@ -3973,14 +3996,25 @@ function Start-AzureRoleActivation {
         }
 
         $response = Invoke-AzurePIMApi -Path $path -Method "PUT" -Body $body
-        return @{ Success = $true; Error = $null }
+        return @{ Success = $true; Error = $null; ClaimsChallenge = $null }
     } catch {
         $errorMsg = $_.Exception.Message
+        
+        # Check for Conditional Access claims challenge (step-up authentication required)
+        if ($errorMsg -like "*&claims=*") {
+            $claimsMatch = [regex]::Match($errorMsg, '&claims=([^&\s\]]+)')
+            if ($claimsMatch.Success) {
+                $encodedClaims = $claimsMatch.Groups[1].Value
+                $decodedClaims = [System.Web.HttpUtility]::UrlDecode($encodedClaims)
+                return @{ Success = $false; Error = $errorMsg; ClaimsChallenge = $decodedClaims }
+            }
+        }
+        
         # Provide friendlier message for common errors
         if ($errorMsg -match "already exists") {
             $errorMsg = "Already active (Azure API may take a few minutes to sync)"
         }
-        return @{ Success = $false; Error = $errorMsg }
+        return @{ Success = $false; Error = $errorMsg; ClaimsChallenge = $null }
     }
 }
 
@@ -4974,6 +5008,48 @@ function Show-AzureActivationWizard {
         if ($result.Success) {
             Write-Host "✅ Role activation submitted for: $roleName" -ForegroundColor Green
             $successCount++
+        } elseif ($result.ClaimsChallenge) {
+            # Conditional Access requires step-up authentication (ACRS claim)
+            Write-Host "🔐 $roleName requires additional authentication (Conditional Access)..." -ForegroundColor Yellow
+            
+            try {
+                # Get new token with claims challenge
+                $newToken = Get-AzureBrowserAccessTokenWithClaims -Claims $result.ClaimsChallenge
+                
+                if ($newToken) {
+                    # Decode JWT to get account ID, tenant ID
+                    $tokenParts = $newToken.Split('.')
+                    $payload = $tokenParts[1]
+                    # Add padding if needed
+                    $padding = 4 - ($payload.Length % 4)
+                    if ($padding -ne 4) { $payload += '=' * $padding }
+                    $decodedPayload = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload))
+                    $claims = $decodedPayload | ConvertFrom-Json
+                    $accountId = if ($claims.upn) { $claims.upn } elseif ($claims.preferred_username) { $claims.preferred_username } else { $claims.sub }
+                    $tenantId = $claims.tid
+                    
+                    # Reconnect to Azure with new token
+                    Disconnect-AzAccount -ErrorAction SilentlyContinue | Out-Null
+                    Clear-AzContext -Force -ErrorAction SilentlyContinue | Out-Null
+                    $null = Connect-AzAccount -AccessToken $newToken -AccountId $accountId -Tenant $tenantId -ErrorAction Stop
+                    
+                    # Retry the activation request
+                    $retryResult = Start-AzureRoleActivation -EligibleRole $role -Justification $justification -Duration $duration
+                    if ($retryResult.Success) {
+                        Write-Host "✅ Role activation submitted for: $roleName" -ForegroundColor Green
+                        $successCount++
+                    } else {
+                        Write-Host "❌ Failed to activate: $roleName - $($retryResult.Error)" -ForegroundColor Red
+                        $failCount++
+                    }
+                } else {
+                    Write-Host "❌ Failed to activate: $roleName - Step-up authentication failed" -ForegroundColor Red
+                    $failCount++
+                }
+            } catch {
+                Write-Host "❌ Failed to activate: $roleName - $($_.Exception.Message)" -ForegroundColor Red
+                $failCount++
+            }
         } else {
             Write-Host "❌ Failed to activate: $roleName - $($result.Error)" -ForegroundColor Red
             $failCount++
