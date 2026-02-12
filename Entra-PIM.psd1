@@ -6,7 +6,7 @@
     RootModule = 'Entra-PIM.psm1'
 
     # Version number of this module (SemVer format for PSResourceGet)
-    ModuleVersion = '2.2.8'
+    ModuleVersion = '2.2.9'
 
     # ID used to uniquely identify this module
     GUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
@@ -58,6 +58,11 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+## 2.2.9
+- Added step-up authentication support for Azure PIM roles
+- Handles Conditional Access claims challenges (C1/C4) automatically when activating Azure roles
+- Seamless re-authentication and retry on claims challenge, matching Entra PIM behavior
+
 ## 2.2.8
 - Fixed Azure PIM group-based role activation (uses user OID from JWT token)
 - Consistent activation/deactivation UI messages between Entra and Azure workflows
