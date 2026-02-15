@@ -9,7 +9,7 @@ PowerShell module for managing Microsoft Entra PIM (Privileged Identity Manageme
 - **Browser Authentication**: Secure authentication with ForceLogin prompt
 - **Persistent Configuration**: Save custom app registration settings via environment variables
 - **Step-up MFA**: Automatic handling of MFA/claims challenges for privileged roles
-- **Interactive Console**: Easy-to-use TUI for role selection
+- **Interactive Console**: Easy-to-use TUI with back navigation and live countdown timers
 - **Auto-Dependencies**: Automatically installs required modules on first run
 
 ## Demo
@@ -171,30 +171,29 @@ The version check:
 [System.Environment]::SetEnvironmentVariable('ENTRAPIM_DISABLE_UPDATE_CHECK', 'true', 'User')
 ```
 
-## What's New in 2.2.0
+## What's New in 2.3.0
 
-- **Automatic Update Notifications**: Checks PowerShell Gallery once per 24 hours for new versions
-- **Inline Red Notification**: Clean, single-line alert when updates are available
-- **Smart Caching**: Minimizes network calls with 24-hour cached results
-- **Non-Blocking**: 5-second timeout ensures module import isn't delayed
-- **Optional Disable**: Can be turned off via environment variable
+- **Back Navigation**: Every menu now has a `← Back` item — no more restarting the workflow if you pick the wrong option
+- **Live Countdown Timers**: Deactivation role selection shows expiration time counting down in real time (updates every second)
+- **Smart Azure Back**: Back from the Azure action menu returns to subscription selection, not all the way to the workflow selector
+- **Activation Step-Back**: ESC navigates backward through the activation form (reason → duration → role selection)
+- **Countdown Back**: The 5-minute deactivation countdown screen now lets you go back instead of waiting
 
 ### Previous Highlights
 
+**Version 2.2.8**
+- Fixed Azure PIM group-based role activation (uses user OID from JWT token)
+- Consistent activation/deactivation UI messages between Entra and Azure workflows
+- Simplified exit handling
+
+**Version 2.2.0**
+- Automatic update notifications from PowerShell Gallery (once per 24 hours)
+- Smart caching with 5-second timeout for non-blocking checks
+
 **Version 2.1.0**
-
-- **Configure-EntraPIM Command**: Persistent configuration via environment variables - configure once, use everywhere
-- **Clear-EntraPIMConfig Command**: Easy removal of saved configuration
-- **Get-EntraPIMHelp Command**: Comprehensive built-in help and command reference
-- **Visual Confirmation**: See which app registration is being used during authentication
-- **Windows Terminal Fix**: Ctrl+Q now properly closes the terminal in Entra workflow
-- **MSAL Conflict Fix**: Resolved assembly conflicts when multiple Microsoft modules are loaded
-- **macOS Profile Integration**: Automatic PowerShell profile integration for persistent configuration on macOS
-
-**Version 2.0.8**
-- Custom App Registration support with `-ClientId` and `-TenantId` parameters
-- Least-privilege Graph permissions for better security
-- macOS compatibility improvements
+- Configure-EntraPIM command for persistent custom app registration configuration
+- Clear-EntraPIMConfig and Get-EntraPIMHelp commands
+- macOS PowerShell profile integration
 
 **Version 2.0.0**
 - Azure Resource Roles support alongside Entra ID roles

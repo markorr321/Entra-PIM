@@ -6,7 +6,7 @@
     RootModule = 'Entra-PIM.psm1'
 
     # Version number of this module (SemVer format for PSResourceGet)
-    ModuleVersion = '2.2.9'
+    ModuleVersion = '2.3.0'
 
     # ID used to uniquely identify this module
     GUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
@@ -58,6 +58,13 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+## 2.3.0
+- Added back navigation to all menus - select "← Back" to return to the previous screen
+- Live countdown timers on deactivation role selection (expiration updates every second)
+- Back from Azure action menu returns to subscription selection (not workflow selector)
+- Step-back through activation form: ESC goes reason → duration → role selection
+- Back button on 5-minute deactivation countdown screen (any key to go back)
+
 ## 2.2.9
 - Added step-up authentication support for Azure PIM roles
 - Handles Conditional Access claims challenges (C1/C4) automatically when activating Azure roles

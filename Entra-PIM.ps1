@@ -800,32 +800,42 @@ function Show-DynamicExpirationMenu {
             
             # Update arrays to only include active roles
             $selected = $activeSelected
-            if ($currentIndex -ge $activeRoleData.Count) {
-                $currentIndex = $activeRoleData.Count - 1
+
+            # Calculate total display items (roles + back item)
+            $backIndex = $activeRoleData.Count
+            $totalDisplayItems = $activeRoleData.Count + 1
+
+            if ($currentIndex -ge $totalDisplayItems) {
+                $currentIndex = $totalDisplayItems - 1
             }
-            
+
             # Display active roles with dynamic countdown
             for ($i = 0; $i -lt $activeRoleData.Count; $i++) {
                 $roleInfo = $activeRoleData[$i]
-                
+
                 # Display role with selection indicator
                 $checkbox = if ($selected[$i]) { "[✓]" } else { "[ ]" }
                 $arrow = if ($i -eq $currentIndex) { "► " } else { "  " }
-                
+
                 Write-Host "$arrow$checkbox $($roleInfo.Role.RoleName) ($($roleInfo.CountdownText))" -ForegroundColor $(if ($i -eq $currentIndex) { "Yellow" } else { "White" })
             }
-            
+
+            # Show Back item
+            $backArrow = if ($currentIndex -eq $backIndex) { "► " } else { "  " }
+            $backColor = if ($currentIndex -eq $backIndex) { "Yellow" } else { "Gray" }
+            Write-Host "$backArrow← Back" -ForegroundColor $backColor
+
             Write-Host ""
             $selectedCount = ($selected | Where-Object { $_ }).Count
             Write-Host "Roles Selected: $selectedCount" -ForegroundColor Green
             Write-Host ""
             Write-Host "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | $(Get-HelpShortcutText) | $(Get-QuitShortcutText)" -ForegroundColor Magenta
-            
+
             # Handle input with timeout for countdown updates
             $inputAvailable = $false
             $timeout = 1000 # 1 second timeout
             $startTime = Get-Date
-            
+
             while (((Get-Date) - $startTime).TotalMilliseconds -lt $timeout -and -not $inputAvailable) {
                 if ([Console]::KeyAvailable) {
                     $inputAvailable = $true
@@ -833,21 +843,27 @@ function Show-DynamicExpirationMenu {
                 }
                 Start-Sleep -Milliseconds 50
             }
-            
+
             if ($inputAvailable) {
                 $key = [Console]::ReadKey($true)
-                
+
                 switch ($key.Key) {
                     "UpArrow" {
-                        if ($currentIndex -gt 0) { $currentIndex-- }
+                        if ($currentIndex -gt 0) { $currentIndex-- } else { $currentIndex = $totalDisplayItems - 1 }
                     }
                     "DownArrow" {
-                        if ($currentIndex -lt ($RoleExpirationData.Count - 1)) { $currentIndex++ }
+                        if ($currentIndex -lt ($totalDisplayItems - 1)) { $currentIndex++ } else { $currentIndex = 0 }
                     }
                     "Spacebar" {
+                        if ($currentIndex -eq $backIndex) {
+                            return "BACK"
+                        }
                         $selected[$currentIndex] = -not $selected[$currentIndex]
                     }
                     "Enter" {
+                        if ($currentIndex -eq $backIndex) {
+                            return "BACK"
+                        }
                         $selectedIndices = @()
                         for ($i = 0; $i -lt $selected.Count; $i++) {
                             if ($selected[$i]) {
@@ -859,10 +875,10 @@ function Show-DynamicExpirationMenu {
                         return $selectedIndices
                     }
                     "Escape" {
-                        return @()
+                        return "BACK"
                     }
                 }
-                
+
                 # Handle Ctrl+A to select/deselect all
                 if ($key.Modifiers -eq "Control" -and $key.Key -eq "A") {
                     # Check if all are currently selected
@@ -872,7 +888,7 @@ function Show-DynamicExpirationMenu {
                         $selected[$i] = -not $allSelected
                     }
                 }
-                
+
                 # Handle Ctrl+H for help menu
                 if ($key.Modifiers -eq "Control" -and $key.Key -eq "H") {
                     Show-HelpMenu
@@ -1170,9 +1186,13 @@ function Start-RoleDeactivationWorkflowWithCheck {
     
     # Show dynamic countdown menu
     $selectedIndices = Show-DynamicExpirationMenu -RoleExpirationData $roleExpirationData -Title "🔄 Select Active Roles to Deactivate"
-    
+
+    if ($selectedIndices -eq "BACK") {
+        return
+    }
+
     if ($selectedIndices.Count -eq 0) {
-                Write-Host "❌ No roles selected for deactivation." -ForegroundColor Yellow
+        Write-Host "❌ No roles selected for deactivation." -ForegroundColor Yellow
         return
     }
     
@@ -1410,9 +1430,13 @@ function Start-RoleDeactivationWorkflowWithCheck {
     
     # Show dynamic countdown menu
     $selectedIndices = Show-DynamicExpirationMenu -RoleExpirationData $roleExpirationData -Title "🔄 Select Active Roles to Deactivate"
-    
+
+    if ($selectedIndices -eq "BACK") {
+        return
+    }
+
     if ($selectedIndices.Count -eq 0) {
-                Write-Host "❌ No roles selected for deactivation." -ForegroundColor Yellow
+        Write-Host "❌ No roles selected for deactivation." -ForegroundColor Yellow
         return
     }
     
@@ -1934,11 +1958,15 @@ function Show-PIMGlobalHeader {
         
         # Main workflow loop for role selection and activation
         do {
-            # Show checkbox menu for role selection
-            $selectedIndices = Show-CheckboxMenu -Items $roleItems -Title "Select Roles to Activate" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:"
-            
+            # Show checkbox menu for role selection with back option
+            $selectedIndices = Show-CheckboxMenu -Items $roleItems -Title "Select Roles to Activate" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -ShowBack
+
+            # Back returns to action menu
+            if ($selectedIndices -eq "BACK") {
+                return
+            }
+
             if ($selectedIndices.Count -eq 0) {
-                Write-Host "❌ No roles selected for activation." -ForegroundColor Yellow
                 return
             }
             
@@ -2693,11 +2721,13 @@ function Show-PIMGlobalHeader {
             Write-Host "  ⏳ $($roleInfo.RoleName): --:-- remaining" -ForegroundColor Cyan
         }
         Write-Host ""
-        Write-Host "Ctrl+Q to exit" -ForegroundColor Magenta
-        
+        Write-Host "  ← Back" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
+
         do {
             $allReady = $true
-            
+
             # Update each role's countdown in place
             for ($i = 0; $i -lt $deduplicatedRoles.Count; $i++) {
                 $roleInfo = $deduplicatedRoles[$i]
@@ -2705,17 +2735,17 @@ function Show-PIMGlobalHeader {
                     $activationTime = $roleInfo.ActivationTime
                     $deactivationTime = $activationTime.AddMinutes(5)
                     $timeRemaining = $deactivationTime - (Get-Date)
-                    
+
                     # Position cursor at this role's line
                     $lineNumber = $roleStartLine + $i
                     [Console]::SetCursorPosition(0, $lineNumber)
-                    
+
                     if ($timeRemaining.TotalSeconds -gt 0) {
                         $allReady = $false
                         $minutes = [int][math]::Floor($timeRemaining.TotalMinutes)
                         $seconds = [int][math]::Floor($timeRemaining.TotalSeconds % 60)
                         $timeDisplay = "{0:D2}:{1:D2}" -f $minutes, $seconds
-                        
+
                         # Update only the time part to reduce flicker
                         Write-Host "  ⏳ $($roleInfo.RoleName): $timeDisplay remaining" -ForegroundColor Cyan -NoNewline
                         Write-Host (" " * ([Console]::WindowWidth - [Console]::CursorLeft - 1))
@@ -2733,16 +2763,15 @@ function Show-PIMGlobalHeader {
                     Write-Host "  ❓ $($roleInfo.RoleName): Unable to check" -ForegroundColor Yellow
                 }
             }
-            
-            # Check if user pressed a key to skip
+
+            # Check if user pressed a key
             if ([Console]::KeyAvailable) {
                 $key = [Console]::ReadKey($true)
                 if (Test-QuitShortcut -Key $key) {
                     Invoke-PIMExit
                 } else {
-                Write-Host "Countdown skipped by user." -ForegroundColor Yellow
-                    Start-Sleep -Seconds 1
-                        break
+                    # Any other key = go back
+                    return "BACK"
                 }
                 }
             
@@ -2779,6 +2808,8 @@ function Show-PIMGlobalHeader {
         $selected = @{}
         $currentStep = 0  # 0 = role selection, 1 = duration, 2 = justification, 3 = ready to submit
         $currentRoleIndex = 0
+        $totalRoleDisplayItems = $RoleItems.Count + 1  # +1 for Back item
+        $backIndex = $RoleItems.Count
         $durationInput = ""
         $justificationInput = ""
         
@@ -2797,14 +2828,19 @@ function Show-PIMGlobalHeader {
                     $arrow = if ($i -eq $currentRoleIndex -and $currentStep -eq 0) { "► " } else { "  " }
                     $color = if ($i -eq $currentRoleIndex -and $currentStep -eq 0) { "Yellow" } else { "White" }
                     $checkboxColor = if ($selected[$i]) { "Green" } else { "Gray" }
-                    
+
                     Write-Host "$arrow" -NoNewline -ForegroundColor $color
                     Write-Host "$checkbox " -NoNewline -ForegroundColor $checkboxColor
                     Write-Host "$($RoleItems[$i])" -ForegroundColor $color
                 }
-                
-                Write-Host ""
-                
+
+                # Show Back item in role selection step
+                if ($currentStep -eq 0) {
+                    $backArrow = if ($currentRoleIndex -eq $backIndex) { "► " } else { "  " }
+                    $backColor = if ($currentRoleIndex -eq $backIndex) { "Yellow" } else { "Gray" }
+                    Write-Host "$backArrow← Back" -ForegroundColor $backColor
+                }
+
                 Write-Host ""
                 
                 # Show fields dynamically based on current step
@@ -2848,21 +2884,28 @@ function Show-PIMGlobalHeader {
                     switch ($key.Key) {
                     "UpArrow" {
                         if ($currentStep -eq 0) {
-                            $currentRoleIndex = if ($currentRoleIndex -gt 0) { $currentRoleIndex - 1 } else { $RoleItems.Count - 1 }
+                            $currentRoleIndex = if ($currentRoleIndex -gt 0) { $currentRoleIndex - 1 } else { $totalRoleDisplayItems - 1 }
                         }
                     }
                     "DownArrow" {
                         if ($currentStep -eq 0) {
-                            $currentRoleIndex = if ($currentRoleIndex -lt ($RoleItems.Count - 1)) { $currentRoleIndex + 1 } else { 0 }
+                            $currentRoleIndex = if ($currentRoleIndex -lt ($totalRoleDisplayItems - 1)) { $currentRoleIndex + 1 } else { 0 }
                         }
                     }
                     "Spacebar" {
                         if ($currentStep -eq 0) {
+                            if ($currentRoleIndex -eq $backIndex) {
+                                return $null
+                            }
                             $selected[$currentRoleIndex] = -not $selected[$currentRoleIndex]
                         }
                     }
                     "Enter" {
                         if ($currentStep -eq 0) {
+                            # If on the Back item, go back
+                            if ($currentRoleIndex -eq $backIndex) {
+                                return $null
+                            }
                             # Step 0: Role selection -> Duration
                             $selectedIndices = @()
                             for ($i = 0; $i -lt $RoleItems.Count; $i++) {
@@ -2870,7 +2913,7 @@ function Show-PIMGlobalHeader {
                                     $selectedIndices += $i
                                 }
                             }
-                            
+
                             if ($selectedIndices.Count -eq 0) {
                                 Write-Host ""
                                 Write-Host "❌ Please select at least one role." -ForegroundColor Red
@@ -2878,7 +2921,7 @@ function Show-PIMGlobalHeader {
                                 Start-Sleep -Seconds 2
                                 continue
                             }
-                            
+
                             $currentStep = 1  # Move to duration input
                             [Console]::CursorVisible = $true
                             Show-DynamicControlBar -ControlsText "Type duration | ENTER Continue to Reason | $(Get-QuitShortcutText)"
@@ -2947,7 +2990,16 @@ function Show-PIMGlobalHeader {
                         }
                     }
                     "Escape" {
-                        return $null
+                        if ($currentStep -eq 0) {
+                            return $null  # Back to action menu
+                        } elseif ($currentStep -eq 1) {
+                            $durationInput = ""
+                            $currentStep = 0  # Back to role selection
+                            [Console]::CursorVisible = $false
+                        } elseif ($currentStep -eq 2) {
+                            $justificationInput = ""
+                            $currentStep = 1  # Back to duration
+                        }
                     }
                 }
             } while ($true)
@@ -3021,7 +3073,8 @@ function Show-PIMGlobalHeader {
             [switch]$SingleSelection = $false,
             [switch]$PreserveContent = $false,
             [switch]$KeepSelectionVisible = $false,
-            [string]$DisplayProperty = $null
+            [string]$DisplayProperty = $null,
+            [switch]$ShowBack = $false
         )
         
         if ($Items.Count -eq 0) {
@@ -3032,7 +3085,9 @@ function Show-PIMGlobalHeader {
         # Initialize selection state
         $selected = @{}
         $currentIndex = 0
-        
+        $totalDisplayItems = if ($ShowBack) { $Items.Count + 1 } else { $Items.Count }
+        $backIndex = if ($ShowBack) { $Items.Count } else { -1 }
+
         # For single selection mode, initialize with nothing selected
         for ($i = 0; $i -lt $Items.Count; $i++) {
             $selected[$i] = $false
@@ -3058,22 +3113,29 @@ function Show-PIMGlobalHeader {
                     $item = $Items[$i]
                     $checkbox = if ($selected[$i]) { "[✓]" } else { "[ ]" }
                     $arrow = if ($i -eq $currentIndex) { "► " } else { "  " }
-                    
+
                     # Get display text
                     $displayText = if ($DisplayProperty -and $item.PSObject.Properties[$DisplayProperty]) {
                         $item.$DisplayProperty
                         } else {
                         $item.ToString()
                     }
-                    
+
                     $line = "$arrow$checkbox $displayText"
-                    
+
                     # Apply colors
                     if ($selected[$i]) {
                         Write-Host $line -ForegroundColor Green
                 } else {
                         Write-Host $line -ForegroundColor White
                     }
+                }
+
+                # Show Back item if enabled
+                if ($ShowBack) {
+                    $backArrow = if ($currentIndex -eq $backIndex) { "► " } else { "  " }
+                    $backColor = if ($currentIndex -eq $backIndex) { "Yellow" } else { "Gray" }
+                    Write-Host "$backArrow← Back" -ForegroundColor $backColor
                 }
                 
                 Write-Host ""
@@ -3106,12 +3168,16 @@ function Show-PIMGlobalHeader {
 
                 switch ($key.Key.ToString()) {
                     "UpArrow" {
-                        $currentIndex = if ($currentIndex -gt 0) { $currentIndex - 1 } else { $Items.Count - 1 }
+                        $currentIndex = if ($currentIndex -gt 0) { $currentIndex - 1 } else { $totalDisplayItems - 1 }
                     }
                     "DownArrow" {
-                        $currentIndex = if ($currentIndex -lt ($Items.Count - 1)) { $currentIndex + 1 } else { 0 }
+                        $currentIndex = if ($currentIndex -lt ($totalDisplayItems - 1)) { $currentIndex + 1 } else { 0 }
                     }
                     "Spacebar" {
+                        # If on the Back item, treat as back action
+                        if ($ShowBack -and $currentIndex -eq $backIndex) {
+                            return "BACK"
+                        }
                         if ($SingleSelection) {
                             # Clear all selections first for single selection mode
                             for ($i = 0; $i -lt $Items.Count; $i++) {
@@ -3124,6 +3190,10 @@ function Show-PIMGlobalHeader {
                         }
                     }
                     "Enter" {
+                        # If on the Back item, treat as back action
+                        if ($ShowBack -and $currentIndex -eq $backIndex) {
+                            return "BACK"
+                        }
                         $selectedItems = @()
                         for ($i = 0; $i -lt $Items.Count; $i++) {
                             if ($selected[$i]) {
@@ -3139,6 +3209,7 @@ function Show-PIMGlobalHeader {
                         return $selectedItems
                     }
                     "Escape" {
+                        if ($ShowBack) { return "BACK" }
                         return @()
                     }
                     "Q" {
@@ -3222,57 +3293,64 @@ function Show-PIMGlobalHeader {
         param(
             [string]$CurrentUserId
         )
-        
-        [Console]::CursorVisible = $false
-        Clear-Host
-        Show-PIMGlobalHeaderMinimal
-        
-        # Create main choice menu items
-        $menuItems = @(
-            "Activate Roles",
-            "Deactivate Roles"
-        )
-        
-        # Show checkbox menu with single selection
-        $selectedIndices = Show-CheckboxMenu -Items $menuItems -Title "🔄 Choose Action" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -SingleSelection
-        
-        if ($selectedIndices.Count -eq 0) {
-            return
-        }
-        
-        $selectedIndex = $selectedIndices[0]
-        $selectedAction = $menuItems[$selectedIndex]
-        
-        [Console]::CursorVisible = $false
-        
-        if ($selectedAction -eq "Activate Roles") {
-            # Show loading message, then load roles
+
+        do {
+            [Console]::CursorVisible = $false
             Clear-Host
             Show-PIMGlobalHeaderMinimal
-            Write-Host ""
-            Write-Host "🔄 Loading eligible roles..." -ForegroundColor Cyan -NoNewline
-            $eligibleRoles = Get-EligibleRolesOptimized -CurrentUserId $CurrentUserId
-            if ($eligibleRoles.Count -gt 0) {
-                Write-Host " ✅ $($eligibleRoles.Count) found" -ForegroundColor Green
-            } else {
-                Write-Host "" # Complete the loading line
-                Write-Host "" # Add spacing before error message
+
+            # Create main choice menu items
+            $menuItems = @(
+                "Activate Roles",
+                "Deactivate Roles"
+            )
+
+            # Show checkbox menu with single selection and back option
+            $selectedIndices = Show-CheckboxMenu -Items $menuItems -Title "🔄 Choose Action" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -SingleSelection -ShowBack
+
+            # Back returns to workflow selector
+            if ($selectedIndices -eq "BACK") {
+                return
             }
-            Start-RoleActivationWorkflow -ValidRoles $eligibleRoles -CurrentUserId $CurrentUserId
-        } elseif ($selectedAction -eq "Deactivate Roles") {
-            # Show loading message, then load roles
-            Clear-Host
-            Show-PIMGlobalHeaderMinimal
-            Write-Host ""
-            Write-Host "🔄 Loading active roles..." -ForegroundColor Cyan -NoNewline
-            $activeRoles = Get-ActiveRolesOptimized -CurrentUserId $CurrentUserId
-            if ($activeRoles.Count -gt 0) {
-                Write-Host " ✅ $($activeRoles.Count) found" -ForegroundColor Green
-            } else {
-                Write-Host "" # New line before error message
+
+            if ($selectedIndices.Count -eq 0) {
+                return
             }
-            Start-RoleDeactivationWorkflow -ActiveRoles $activeRoles -CurrentUserId $CurrentUserId
-        }
+
+            $selectedIndex = $selectedIndices[0]
+            $selectedAction = $menuItems[$selectedIndex]
+
+            [Console]::CursorVisible = $false
+
+            if ($selectedAction -eq "Activate Roles") {
+                # Show loading message, then load roles
+                Clear-Host
+                Show-PIMGlobalHeaderMinimal
+                Write-Host ""
+                Write-Host "🔄 Loading eligible roles..." -ForegroundColor Cyan -NoNewline
+                $eligibleRoles = Get-EligibleRolesOptimized -CurrentUserId $CurrentUserId
+                if ($eligibleRoles.Count -gt 0) {
+                    Write-Host " ✅ $($eligibleRoles.Count) found" -ForegroundColor Green
+                } else {
+                    Write-Host "" # Complete the loading line
+                    Write-Host "" # Add spacing before error message
+                }
+                Start-RoleActivationWorkflow -ValidRoles $eligibleRoles -CurrentUserId $CurrentUserId
+            } elseif ($selectedAction -eq "Deactivate Roles") {
+                # Show loading message, then load roles
+                Clear-Host
+                Show-PIMGlobalHeaderMinimal
+                Write-Host ""
+                Write-Host "🔄 Loading active roles..." -ForegroundColor Cyan -NoNewline
+                $activeRoles = Get-ActiveRolesOptimized -CurrentUserId $CurrentUserId
+                if ($activeRoles.Count -gt 0) {
+                    Write-Host " ✅ $($activeRoles.Count) found" -ForegroundColor Green
+                } else {
+                    Write-Host "" # New line before error message
+                }
+                Start-RoleDeactivationWorkflow -ActiveRoles $activeRoles -CurrentUserId $CurrentUserId
+            }
+        } while ($true)
     }
     
     function Start-RoleActivationWorkflowWithCheck {
@@ -3360,12 +3438,6 @@ function Start-RoleDeactivationWorkflow {
     )
     
     
-    # Get cached schedules for activation time checking
-    try {
-        $cachedSchedules = Get-CachedSchedules -CurrentUserId $CurrentUserId
-    } catch {
-        $cachedSchedules = @()
-    }
         [Console]::CursorVisible = $false
         if ($ActiveRoles.Count -eq 0) {
             Write-Host ""
@@ -3564,118 +3636,26 @@ function Start-RoleDeactivationWorkflow {
         return
     }
     
-    # Get role expiration data for countdown display
-    try {
-        $roleExpirationData = @()
-        
-        foreach ($role in $readyToDeactivate) {
-            $assignment = $role.Assignment
-            $schedules = $cachedSchedules | Where-Object { 
-                $_.PrincipalId -eq $assignment.PrincipalId -and 
-                $_.RoleDefinitionId -eq $assignment.RoleDefinitionId 
-            }
-            $schedule = $schedules | Sort-Object CreatedDateTime -Descending | Select-Object -First 1
-            
-            if ($schedule.ScheduleInfo.Expiration.EndDateTime) {
-                $expirationTime = [DateTime]::Parse($schedule.ScheduleInfo.Expiration.EndDateTime, [System.Globalization.CultureInfo]::InvariantCulture).ToLocalTime()
-                $roleExpirationData += [PSCustomObject]@{
-                    RoleName = $role.RoleName
-                    ExpirationTime = $expirationTime
-                    Assignment = $assignment
-                    Index = $readyToDeactivate.IndexOf($role)
-                }
-            }
+    # Build role expiration data for dynamic countdown menu
+    # Use ExpirationTime already available on role objects from Get-ActiveRolesOptimized
+    $roleExpirationData = @()
+    foreach ($role in $readyToDeactivate) {
+        $roleExpirationData += [PSCustomObject]@{
+            Role = $role
+            ExpirationTime = $role.ExpirationTime
         }
-        
-        # Remove duplicates
-        $roleExpirationData = $roleExpirationData | Sort-Object RoleName, ExpirationTime -Descending | Group-Object RoleName | ForEach-Object { $_.Group[0] }
-        
-    } catch {
-        Write-Host "⚠️ Could not retrieve role expiration data for countdown display: $($_.Exception.Message)" -ForegroundColor Yellow
-        $roleExpirationData = @()
     }
-    
-    # Use countdown menu if we have expiration data
-    # Clear screen before showing menu to remove any stale content
+
+    # Show dynamic countdown menu with live expiration timers and back option
     Clear-Host
-    if ($roleExpirationData.Count -gt 0) {
-        $selectedIndices = Show-CheckboxMenu -Items $readyToDeactivate -Title "🔄 Select Active Roles to Deactivate" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -DisplayProperty "RoleName"
-    } else {
-        # OPTIMIZED: Batch get all expiration data in single API call
-        $allScheduleInstances = Get-MgRoleManagementDirectoryRoleAssignmentScheduleInstance -Filter "PrincipalId eq '$CurrentUserId' and AssignmentType eq 'Activated'" -All
-        $scheduleInstanceLookup = @{}
-        foreach ($instance in $allScheduleInstances) {
-            $scheduleInstanceLookup[$instance.RoleDefinitionId] = $instance
-        }
-        
-        $roleItemsWithExpiration = @()
-        foreach ($role in $readyToDeactivate) {
-            $assignment = $role.Assignment
-            
-            # Get expiration time from lookup table (O(1) access)
-            try {
-                $scheduleInstance = $scheduleInstanceLookup[$assignment.RoleDefinitionId]
-                
-                if ($scheduleInstance -and $scheduleInstance.EndDateTime) {
-                    $expirationTime = [DateTime]::Parse($scheduleInstance.EndDateTime, [System.Globalization.CultureInfo]::InvariantCulture).ToLocalTime()
-                    $timeRemaining = $expirationTime - (Get-Date)
-                    
-                    
-                    if ($timeRemaining.TotalSeconds -gt 0) {
-                        $hours = [Math]::Floor($timeRemaining.TotalHours)
-                        $minutes = $timeRemaining.Minutes
-                        $seconds = $timeRemaining.Seconds
-                        
-                        if ($hours -gt 0) {
-                            $countdownText = "expires in ${hours}h ${minutes}m"
-                        } else {
-                            $countdownText = "expires in ${minutes}m ${seconds}s"
-                        }
-                        
-                        $roleItemsWithExpiration += "$($role.RoleName) ($countdownText)"
-                    } else {
-                        $roleItemsWithExpiration += "$($role.RoleName) (expired)"
-                    }
-                } else {
-                    # Try alternative approach using cached schedules
-                    $cachedSchedules = Get-CachedSchedules -CurrentUserId $CurrentUserId
-                    $schedules = $cachedSchedules | Where-Object { 
-                        $_.PrincipalId -eq $assignment.PrincipalId -and 
-                        $_.RoleDefinitionId -eq $assignment.RoleDefinitionId 
-                    }
-                    $schedule = $schedules | Sort-Object CreatedDateTime -Descending | Select-Object -First 1
-                    
-                    if ($schedule.ScheduleInfo.Expiration.EndDateTime) {
-                        $expirationTime = [DateTime]::Parse($schedule.ScheduleInfo.Expiration.EndDateTime, [System.Globalization.CultureInfo]::InvariantCulture).ToLocalTime()
-                        $timeRemaining = $expirationTime - (Get-Date)
-                        
-                        if ($timeRemaining.TotalSeconds -gt 0) {
-                            $hours = [Math]::Floor($timeRemaining.TotalHours)
-                            $minutes = $timeRemaining.Minutes
-                            
-                            if ($hours -gt 0) {
-                                $countdownText = "expires in ${hours}h ${minutes}m"
-                            } else {
-                                $countdownText = "expires in ${minutes}m"
-                            }
-                            
-                            $roleItemsWithExpiration += "$($role.RoleName) ($countdownText)"
-                        } else {
-                            $roleItemsWithExpiration += "$($role.RoleName) (expired)"
-                        }
-                    } else {
-                        $roleItemsWithExpiration += "$($role.RoleName) (no expiration data)"
-                    }
-                }
-            } catch {
-                $roleItemsWithExpiration += "$($role.RoleName) (expiration unknown)"
-            }
-        }
-        $selectedIndices = Show-CheckboxMenu -Items $roleItemsWithExpiration -Title "🔄 Select Active Roles to Deactivate" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:"
+    $selectedIndices = Show-DynamicExpirationMenu -RoleExpirationData $roleExpirationData -Title "🔄 Select Active Roles to Deactivate"
+
+    if ($selectedIndices -eq "BACK") {
+        return
     }
-    
+
     if ($selectedIndices.Count -eq 0) {
-                Write-Host "❌ No roles selected for deactivation." -ForegroundColor Yellow
+        Write-Host "❌ No roles selected for deactivation." -ForegroundColor Yellow
         return
     }
     
@@ -4215,20 +4195,6 @@ function Start-AzurePIMWorkflow {
             }
         }
 
-        $selectedSubIndices = Show-CheckboxMenu -Items $subItems -Title "📦 Select Subscription" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -DisplayProperty "Name" -SingleSelection
-
-        if ($selectedSubIndices.Count -eq 0) {
-            return
-        }
-
-        $selectedSub = $subscriptions[$selectedSubIndices[0]]
-        $script:AzureSelectedSubscriptions = @([PSCustomObject]@{
-            Id   = $selectedSub.Id
-            Name = $selectedSub.Name
-        })
-
-        Set-AzContext -SubscriptionId $selectedSub.Id -ErrorAction SilentlyContinue | Out-Null
-
     } catch {
         Write-Host "❌ Failed to connect: $($_.Exception.Message)" -ForegroundColor Red
         Write-Host "Press any key to continue..." -ForegroundColor Gray
@@ -4242,7 +4208,31 @@ function Start-AzurePIMWorkflow {
         $script:AzureCurrentUserId = (Get-AzContext).Account.Id
     }
 
-    Start-AzurePIMRoleManagement
+    # Subscription selection + role management loop
+    # Back from action menu returns here to re-pick subscription
+    do {
+        $selectedSubIndices = Show-CheckboxMenu -Items $subItems -Title "📦 Select Subscription" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -DisplayProperty "Name" -SingleSelection -ShowBack
+
+        # Back returns to workflow selector
+        if ($selectedSubIndices -eq "BACK") {
+            return
+        }
+
+        if ($selectedSubIndices.Count -eq 0) {
+            return
+        }
+
+        $selectedSub = $subscriptions[$selectedSubIndices[0]]
+        $script:AzureSelectedSubscriptions = @([PSCustomObject]@{
+            Id   = $selectedSub.Id
+            Name = $selectedSub.Name
+        })
+
+        Set-AzContext -SubscriptionId $selectedSub.Id -ErrorAction SilentlyContinue | Out-Null
+
+        Start-AzurePIMRoleManagement
+        # When Start-AzurePIMRoleManagement returns (via BACK), loop back to subscription selection
+    } while ($true)
 }
 
 function Show-AzurePIMHeader {
@@ -4274,7 +4264,8 @@ function Show-AzureCheckboxMenu {
         [array]$Items,
         [string]$Title = "Select Items",
         [string]$Prompt = "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:",
-        [switch]$SingleSelection = $false
+        [switch]$SingleSelection = $false,
+        [switch]$ShowBack = $false
     )
 
     if ($Items.Count -eq 0) {
@@ -4284,6 +4275,8 @@ function Show-AzureCheckboxMenu {
 
     $selected = @{}
     $currentIndex = 0
+    $totalDisplayItems = if ($ShowBack) { $Items.Count + 1 } else { $Items.Count }
+    $backIndex = if ($ShowBack) { $Items.Count } else { -1 }
 
     for ($i = 0; $i -lt $Items.Count; $i++) {
         $selected[$i] = $false
@@ -4311,6 +4304,13 @@ function Show-AzureCheckboxMenu {
                 } else {
                     Write-Host $line -ForegroundColor White
                 }
+            }
+
+            # Show Back item if enabled
+            if ($ShowBack) {
+                $backArrow = if ($currentIndex -eq $backIndex) { "► " } else { "  " }
+                $backColor = if ($currentIndex -eq $backIndex) { "Yellow" } else { "Gray" }
+                Write-Host "$backArrow← Back" -ForegroundColor $backColor
             }
 
             Write-Host ""
@@ -4349,12 +4349,17 @@ function Show-AzureCheckboxMenu {
 
             switch ($key.Key) {
                 "UpArrow" {
-                    $currentIndex = if ($currentIndex -gt 0) { $currentIndex - 1 } else { $Items.Count - 1 }
+                    $currentIndex = if ($currentIndex -gt 0) { $currentIndex - 1 } else { $totalDisplayItems - 1 }
                 }
                 "DownArrow" {
-                    $currentIndex = if ($currentIndex -lt ($Items.Count - 1)) { $currentIndex + 1 } else { 0 }
+                    $currentIndex = if ($currentIndex -lt ($totalDisplayItems - 1)) { $currentIndex + 1 } else { 0 }
                 }
                 "Spacebar" {
+                    # If on the Back item, treat as back action
+                    if ($ShowBack -and $currentIndex -eq $backIndex) {
+                        [Console]::CursorVisible = $true
+                        return "BACK"
+                    }
                     if ($SingleSelection) {
                         for ($i = 0; $i -lt $Items.Count; $i++) {
                             $selected[$i] = $false
@@ -4365,6 +4370,11 @@ function Show-AzureCheckboxMenu {
                     }
                 }
                 "Enter" {
+                    # If on the Back item, treat as back action
+                    if ($ShowBack -and $currentIndex -eq $backIndex) {
+                        [Console]::CursorVisible = $true
+                        return "BACK"
+                    }
                     $selectedItems = @()
                     for ($i = 0; $i -lt $Items.Count; $i++) {
                         if ($selected[$i]) {
@@ -4376,6 +4386,7 @@ function Show-AzureCheckboxMenu {
                 }
                 "Escape" {
                     [Console]::CursorVisible = $true
+                    if ($ShowBack) { return "BACK" }
                     return @()
                 }
             }
@@ -4387,69 +4398,76 @@ function Show-AzureCheckboxMenu {
 }
 
 function Start-AzurePIMRoleManagement {
-    [Console]::CursorVisible = $false
+    do {
+        [Console]::CursorVisible = $false
 
-    # Always show both options - same as Entra workflow
-    $menuItems = @(
-        "Activate Roles",
-        "Deactivate Roles"
-    )
+        # Always show both options - same as Entra workflow
+        $menuItems = @(
+            "Activate Roles",
+            "Deactivate Roles"
+        )
 
-    # Show action menu using Azure checkbox menu
-    $selectedIndices = Show-AzureCheckboxMenu -Items $menuItems -Title "🔄 Choose Action" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -SingleSelection
+        # Show action menu using Azure checkbox menu with back option
+        $selectedIndices = Show-AzureCheckboxMenu -Items $menuItems -Title "🔄 Choose Action" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -SingleSelection -ShowBack
 
-    if ($null -eq $selectedIndices -or $selectedIndices.Count -eq 0) {
-        return
-    }
-
-    $selectedIndex = $selectedIndices[0]
-    $selectedAction = $menuItems[$selectedIndex]
-
-    [Console]::CursorVisible = $false
-
-    if ($selectedAction -eq "Activate Roles") {
-        # Show loading message, then load roles - same as Entra
-        Clear-Host
-        Show-AzurePIMHeader
-        Write-Host ""
-        Write-Host "🔄 Loading eligible roles..." -ForegroundColor Cyan -NoNewline
-
-        $eligibleRoles = Get-AzureEligibleRoles
-        $activeRoles = Get-AzureActiveRoles
-
-        # Filter out already active roles from eligible
-        $activeKeys = $activeRoles | ForEach-Object { "$($_.RoleDefinitionId)|$($_.Scope)" }
-        $availableForActivation = @($eligibleRoles | Where-Object {
-            $key = "$($_.RoleDefinitionId)|$($_.Scope)"
-            $activeKeys -notcontains $key
-        })
-
-        if ($availableForActivation.Count -gt 0) {
-            Write-Host " ✅ $($availableForActivation.Count) found" -ForegroundColor Green
-        } else {
-            Write-Host ""
-            Write-Host ""
+        # Back returns to workflow selector
+        if ($selectedIndices -eq "BACK") {
+            return
         }
 
-        Start-AzureRoleActivationWorkflow -EligibleRoles $availableForActivation -ActiveRoles $activeRoles
-
-    } elseif ($selectedAction -eq "Deactivate Roles") {
-        # Show loading message, then load roles - same as Entra
-        Clear-Host
-        Show-AzurePIMHeader
-        Write-Host ""
-        Write-Host "🔄 Loading active roles..." -ForegroundColor Cyan -NoNewline
-
-        $activeRoles = Get-AzureActiveRoles
-
-        if ($activeRoles.Count -gt 0) {
-            Write-Host " ✅ $($activeRoles.Count) found" -ForegroundColor Green
-        } else {
-            Write-Host ""
+        if ($null -eq $selectedIndices -or $selectedIndices.Count -eq 0) {
+            return
         }
 
-        Start-AzureRoleDeactivationWorkflow -ActiveRoles $activeRoles
-    }
+        $selectedIndex = $selectedIndices[0]
+        $selectedAction = $menuItems[$selectedIndex]
+
+        [Console]::CursorVisible = $false
+
+        if ($selectedAction -eq "Activate Roles") {
+            # Show loading message, then load roles - same as Entra
+            Clear-Host
+            Show-AzurePIMHeader
+            Write-Host ""
+            Write-Host "🔄 Loading eligible roles..." -ForegroundColor Cyan -NoNewline
+
+            $eligibleRoles = Get-AzureEligibleRoles
+            $activeRoles = Get-AzureActiveRoles
+
+            # Filter out already active roles from eligible
+            $activeKeys = $activeRoles | ForEach-Object { "$($_.RoleDefinitionId)|$($_.Scope)" }
+            $availableForActivation = @($eligibleRoles | Where-Object {
+                $key = "$($_.RoleDefinitionId)|$($_.Scope)"
+                $activeKeys -notcontains $key
+            })
+
+            if ($availableForActivation.Count -gt 0) {
+                Write-Host " ✅ $($availableForActivation.Count) found" -ForegroundColor Green
+            } else {
+                Write-Host ""
+                Write-Host ""
+            }
+
+            Start-AzureRoleActivationWorkflow -EligibleRoles $availableForActivation -ActiveRoles $activeRoles
+
+        } elseif ($selectedAction -eq "Deactivate Roles") {
+            # Show loading message, then load roles - same as Entra
+            Clear-Host
+            Show-AzurePIMHeader
+            Write-Host ""
+            Write-Host "🔄 Loading active roles..." -ForegroundColor Cyan -NoNewline
+
+            $activeRoles = Get-AzureActiveRoles
+
+            if ($activeRoles.Count -gt 0) {
+                Write-Host " ✅ $($activeRoles.Count) found" -ForegroundColor Green
+            } else {
+                Write-Host ""
+            }
+
+            Start-AzureRoleDeactivationWorkflow -ActiveRoles $activeRoles
+        }
+    } while ($true)
 }
 
 function Start-AzureRoleActivationWorkflow {
@@ -4735,7 +4753,9 @@ function Show-AzureDeactivationCountdown {
             Write-Host "  ⏳ $($roleInfo.RoleName): --:-- remaining" -ForegroundColor Cyan
         }
         Write-Host ""
-        Write-Host "Ctrl+Q to exit" -ForegroundColor Magenta
+        Write-Host "  ← Back" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
 
         do {
             $allReady = $true
@@ -4778,6 +4798,9 @@ function Show-AzureDeactivationCountdown {
                 $key = [Console]::ReadKey($true)
                 if (Test-QuitShortcut -Key $key) {
                     Invoke-AzurePIMExit
+                } else {
+                    # Any other key = go back
+                    return "BACK"
                 }
             }
 
@@ -4792,6 +4815,187 @@ function Show-AzureDeactivationCountdown {
     } catch {
         Write-Host "Error in countdown: $($_.Exception.Message)" -ForegroundColor Red
         return $false
+    }
+}
+
+function Show-AzureDynamicExpirationMenu {
+    param(
+        [array]$RoleExpirationData,
+        [string]$Title
+    )
+
+    [Console]::CursorVisible = $false
+    $currentIndex = 0
+    $selected = @()
+    for ($i = 0; $i -lt $RoleExpirationData.Count; $i++) {
+        $selected += $false
+    }
+
+    try {
+        do {
+            Clear-Host
+            Show-AzurePIMHeader
+            Write-Host ""
+            Write-Host $Title -ForegroundColor Cyan
+            Write-Host ("=" * $Title.Length) -ForegroundColor Cyan
+            Write-Host ""
+
+            # Filter out expired roles and check if any remain
+            $activeRoleData = @()
+            $activeSelected = @()
+
+            for ($i = 0; $i -lt $RoleExpirationData.Count; $i++) {
+                $roleData = $RoleExpirationData[$i]
+                $expirationTime = $roleData.ExpirationTime
+
+                # Calculate countdown
+                $isExpired = $false
+                if ($expirationTime) {
+                    $timeRemaining = $expirationTime - (Get-Date)
+
+                    if ($timeRemaining.TotalSeconds -gt 0) {
+                        $hours = [Math]::Floor($timeRemaining.TotalHours)
+                        $minutes = $timeRemaining.Minutes
+                        $seconds = $timeRemaining.Seconds
+
+                        if ($hours -gt 0) {
+                            $countdownText = "expires in ${hours}h ${minutes}m ${seconds}s"
+                        } else {
+                            $countdownText = "expires in ${minutes}m ${seconds}s"
+                        }
+                    } else {
+                        $countdownText = "expired"
+                        $isExpired = $true
+                    }
+                } else {
+                    $countdownText = "no expiration data"
+                }
+
+                # Only include non-expired roles
+                if (-not $isExpired) {
+                    $activeRoleData += @{
+                        DisplayName = $roleData.DisplayName
+                        ExpirationTime = $expirationTime
+                        CountdownText = $countdownText
+                        OriginalIndex = $i
+                    }
+                    $activeSelected += $selected[$i]
+                }
+            }
+
+            # Check if all roles expired
+            if ($activeRoleData.Count -eq 0) {
+                Write-Host "ℹ️  All roles have expired." -ForegroundColor Gray
+                Write-Host ""
+                Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
+                do {
+                    $key = [Console]::ReadKey($true)
+                    if (Test-QuitShortcut -Key $key) { Invoke-AzurePIMExit }
+                } while ($true)
+            }
+
+            # Update arrays to only include active roles
+            $selected = $activeSelected
+
+            # Calculate total display items (roles + back item)
+            $backIndex = $activeRoleData.Count
+            $totalDisplayItems = $activeRoleData.Count + 1
+
+            if ($currentIndex -ge $totalDisplayItems) {
+                $currentIndex = $totalDisplayItems - 1
+            }
+
+            # Display active roles with dynamic countdown
+            for ($i = 0; $i -lt $activeRoleData.Count; $i++) {
+                $roleInfo = $activeRoleData[$i]
+
+                $checkbox = if ($selected[$i]) { "[✓]" } else { "[ ]" }
+                $arrow = if ($i -eq $currentIndex) { "► " } else { "  " }
+
+                Write-Host "$arrow$checkbox $($roleInfo.DisplayName) ($($roleInfo.CountdownText))" -ForegroundColor $(if ($i -eq $currentIndex) { "Yellow" } else { "White" })
+            }
+
+            # Show Back item
+            $backArrow = if ($currentIndex -eq $backIndex) { "► " } else { "  " }
+            $backColor = if ($currentIndex -eq $backIndex) { "Yellow" } else { "Gray" }
+            Write-Host "$backArrow← Back" -ForegroundColor $backColor
+
+            Write-Host ""
+            $selectedCount = ($selected | Where-Object { $_ }).Count
+            Write-Host "Roles Selected: $selectedCount" -ForegroundColor Green
+            Write-Host ""
+            Write-Host "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | $(Get-HelpShortcutText) | $(Get-QuitShortcutText)" -ForegroundColor Magenta
+
+            # Handle input with timeout for countdown updates
+            $inputAvailable = $false
+            $timeout = 1000
+            $startTime = Get-Date
+
+            while (((Get-Date) - $startTime).TotalMilliseconds -lt $timeout -and -not $inputAvailable) {
+                if ([Console]::KeyAvailable) {
+                    $inputAvailable = $true
+                    break
+                }
+                Start-Sleep -Milliseconds 50
+            }
+
+            if ($inputAvailable) {
+                $key = [Console]::ReadKey($true)
+
+                switch ($key.Key) {
+                    "UpArrow" {
+                        if ($currentIndex -gt 0) { $currentIndex-- } else { $currentIndex = $totalDisplayItems - 1 }
+                    }
+                    "DownArrow" {
+                        if ($currentIndex -lt ($totalDisplayItems - 1)) { $currentIndex++ } else { $currentIndex = 0 }
+                    }
+                    "Spacebar" {
+                        if ($currentIndex -eq $backIndex) {
+                            return "BACK"
+                        }
+                        $selected[$currentIndex] = -not $selected[$currentIndex]
+                    }
+                    "Enter" {
+                        if ($currentIndex -eq $backIndex) {
+                            return "BACK"
+                        }
+                        $selectedIndices = @()
+                        for ($i = 0; $i -lt $selected.Count; $i++) {
+                            if ($selected[$i]) {
+                                $selectedIndices += $i
+                            }
+                        }
+                        Clear-Host
+                        return $selectedIndices
+                    }
+                    "Escape" {
+                        return "BACK"
+                    }
+                }
+
+                # Handle Ctrl+A to select/deselect all
+                if ($key.Modifiers -eq "Control" -and $key.Key -eq "A") {
+                    $allSelected = ($selected | Where-Object { $_ -eq $true }).Count -eq $selected.Count
+                    for ($i = 0; $i -lt $selected.Count; $i++) {
+                        $selected[$i] = -not $allSelected
+                    }
+                }
+
+                # Handle Ctrl+H for help menu
+                if ($key.Modifiers -eq "Control" -and $key.Key -eq "H") {
+                    Show-HelpMenu
+                }
+
+                # Handle Ctrl+Q
+                if (Test-QuitShortcut -Key $key) {
+                    Invoke-AzurePIMExit
+                }
+            }
+
+        } while ($true)
+    }
+    finally {
+        # Keep cursor hidden - calling code manages visibility
     }
 }
 
@@ -4851,8 +5055,8 @@ function Start-AzureRoleDeactivation {
         return
     }
 
-    # Build role items with friendly display names (includes scope - Azure specific)
-    $roleItems = @()
+    # Build role expiration data for dynamic countdown menu
+    $roleExpirationData = @()
     foreach ($role in $readyToDeactivate) {
         $friendlyScope = $role.ScopeDisplayName
         if ($role.ScopeDisplayName -match '/subscriptions/[^/]+/resourceGroups/([^/]+)') {
@@ -4860,11 +5064,24 @@ function Start-AzureRoleDeactivation {
         } elseif ($role.ScopeDisplayName -match '/subscriptions/[^/]+$') {
             $friendlyScope = "Subscription"
         }
-        $roleItems += "$($role.RoleDisplayName) - $friendlyScope"
+
+        $expirationTime = $null
+        if ($role.EndDateTime) {
+            $expirationTime = [DateTime]::Parse($role.EndDateTime, [System.Globalization.CultureInfo]::InvariantCulture).ToLocalTime()
+        }
+
+        $roleExpirationData += [PSCustomObject]@{
+            DisplayName = "$($role.RoleDisplayName) - $friendlyScope"
+            ExpirationTime = $expirationTime
+        }
     }
 
-    # Show role selection using Azure checkbox menu
-    $selectedIndices = Show-AzureCheckboxMenu -Items $roleItems -Title "Select Roles to Deactivate" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:"
+    # Show dynamic countdown menu with live expiration timers and back option
+    $selectedIndices = Show-AzureDynamicExpirationMenu -RoleExpirationData $roleExpirationData -Title "🔄 Select Roles to Deactivate"
+
+    if ($selectedIndices -eq "BACK") {
+        return
+    }
 
     if ($null -eq $selectedIndices -or $selectedIndices.Count -eq 0) {
         return
