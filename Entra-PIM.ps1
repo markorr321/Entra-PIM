@@ -4702,8 +4702,12 @@ function Show-AzureRoleActivationUI {
         $roleItems += "$($role.RoleDisplayName) - $friendlyScope"
     }
 
-    # Show role selection using Azure checkbox menu
-    $selectedIndices = Show-AzureCheckboxMenu -Items $roleItems -Title "Select Roles to Activate" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:"
+    # Show role selection using Azure checkbox menu with back option
+    $selectedIndices = Show-AzureCheckboxMenu -Items $roleItems -Title "Select Roles to Activate" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -ShowBack
+
+    if ($selectedIndices -eq "BACK") {
+        return
+    }
 
     if ($null -eq $selectedIndices -or $selectedIndices.Count -eq 0) {
         return

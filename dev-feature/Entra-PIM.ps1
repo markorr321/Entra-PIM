@@ -338,6 +338,29 @@ function Get-BrowserAccessTokenWithClaims {
     return $accessToken
 }
 
+function Get-AzureBrowserAccessTokenWithClaims {
+    <#
+    .SYNOPSIS
+        Gets an Azure management access token with claims challenge for Conditional Access step-up authentication.
+    #>
+    param(
+        [string]$Claims
+    )
+
+    # Ensure MSAL helper is compiled
+    if (-not $script:MSALHelperCompiled) {
+        $null = Initialize-MSALHelper
+    }
+
+    # Azure PowerShell client ID and management scope
+    $clientId = "1950a258-227b-4e31-a9cf-717495945fc2"
+    $scopes = @("https://management.azure.com/.default")
+    $tenantId = $script:CustomTenantId  # May be null, which is fine
+
+    $accessToken = [PIMBrowserAuth]::GetAccessTokenWithClaims($clientId, $scopes, $Claims, $tenantId)
+    return $accessToken
+}
+
 # ========================= Browser Authentication =========================
 function Connect-MgGraphWithBrowser {
     param(
@@ -3778,6 +3801,7 @@ function Start-RoleDeactivationWorkflow {
 function Show-WorkflowSelector {
     $menuItems = @(
         "Entra ID Roles",
+        "Entra Group Roles",
         "Azure Resource Roles"
     )
 
@@ -3790,7 +3814,8 @@ function Show-WorkflowSelector {
     $selectedIndex = $selectedIndices[0]
     switch ($selectedIndex) {
         0 { return 'Entra' }
-        1 { return 'Azure' }
+        1 { return 'Groups' }
+        2 { return 'Azure' }
         default { return 'Quit' }
     }
 }
@@ -3953,14 +3978,25 @@ function Start-AzureRoleActivation {
         }
 
         $response = Invoke-AzurePIMApi -Path $path -Method "PUT" -Body $body
-        return @{ Success = $true; Error = $null }
+        return @{ Success = $true; Error = $null; ClaimsChallenge = $null }
     } catch {
         $errorMsg = $_.Exception.Message
+        
+        # Check for Conditional Access claims challenge (step-up authentication required)
+        if ($errorMsg -like "*&claims=*") {
+            $claimsMatch = [regex]::Match($errorMsg, '&claims=([^&\s\]]+)')
+            if ($claimsMatch.Success) {
+                $encodedClaims = $claimsMatch.Groups[1].Value
+                $decodedClaims = [System.Web.HttpUtility]::UrlDecode($encodedClaims)
+                return @{ Success = $false; Error = $errorMsg; ClaimsChallenge = $decodedClaims }
+            }
+        }
+        
         # Provide friendlier message for common errors
         if ($errorMsg -match "already exists") {
             $errorMsg = "Already active (Azure API may take a few minutes to sync)"
         }
-        return @{ Success = $false; Error = $errorMsg }
+        return @{ Success = $false; Error = $errorMsg; ClaimsChallenge = $null }
     }
 }
 
@@ -4668,8 +4704,12 @@ function Show-AzureRoleActivationUI {
         $roleItems += "$($role.RoleDisplayName) - $friendlyScope"
     }
 
-    # Show role selection using Azure checkbox menu
-    $selectedIndices = Show-AzureCheckboxMenu -Items $roleItems -Title "Select Roles to Activate" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:"
+    # Show role selection using Azure checkbox menu with back option
+    $selectedIndices = Show-AzureCheckboxMenu -Items $roleItems -Title "Select Roles to Activate" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -ShowBack
+
+    if ($selectedIndices -eq "BACK") {
+        return
+    }
 
     if ($null -eq $selectedIndices -or $selectedIndices.Count -eq 0) {
         return
@@ -5191,6 +5231,48 @@ function Show-AzureActivationWizard {
         if ($result.Success) {
             Write-Host "✅ Role activation submitted for: $roleName" -ForegroundColor Green
             $successCount++
+        } elseif ($result.ClaimsChallenge) {
+            # Conditional Access requires step-up authentication (ACRS claim)
+            Write-Host "🔐 $roleName requires additional authentication (Conditional Access)..." -ForegroundColor Yellow
+            
+            try {
+                # Get new token with claims challenge
+                $newToken = Get-AzureBrowserAccessTokenWithClaims -Claims $result.ClaimsChallenge
+                
+                if ($newToken) {
+                    # Decode JWT to get account ID, tenant ID
+                    $tokenParts = $newToken.Split('.')
+                    $payload = $tokenParts[1]
+                    # Add padding if needed
+                    $padding = 4 - ($payload.Length % 4)
+                    if ($padding -ne 4) { $payload += '=' * $padding }
+                    $decodedPayload = [System.Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($payload))
+                    $claims = $decodedPayload | ConvertFrom-Json
+                    $accountId = if ($claims.upn) { $claims.upn } elseif ($claims.preferred_username) { $claims.preferred_username } else { $claims.sub }
+                    $tenantId = $claims.tid
+                    
+                    # Reconnect to Azure with new token
+                    Disconnect-AzAccount -ErrorAction SilentlyContinue | Out-Null
+                    Clear-AzContext -Force -ErrorAction SilentlyContinue | Out-Null
+                    $null = Connect-AzAccount -AccessToken $newToken -AccountId $accountId -Tenant $tenantId -ErrorAction Stop
+                    
+                    # Retry the activation request
+                    $retryResult = Start-AzureRoleActivation -EligibleRole $role -Justification $justification -Duration $duration
+                    if ($retryResult.Success) {
+                        Write-Host "✅ Role activation submitted for: $roleName" -ForegroundColor Green
+                        $successCount++
+                    } else {
+                        Write-Host "❌ Failed to activate: $roleName - $($retryResult.Error)" -ForegroundColor Red
+                        $failCount++
+                    }
+                } else {
+                    Write-Host "❌ Failed to activate: $roleName - Step-up authentication failed" -ForegroundColor Red
+                    $failCount++
+                }
+            } catch {
+                Write-Host "❌ Failed to activate: $roleName - $($_.Exception.Message)" -ForegroundColor Red
+                $failCount++
+            }
         } else {
             Write-Host "❌ Failed to activate: $roleName - $($result.Error)" -ForegroundColor Red
             $failCount++
@@ -5251,6 +5333,1097 @@ function Show-AzureActivationWizard {
 
     return $true
 }
+
+# ========================= Groups PIM Functions =========================
+
+function Show-GroupsPIMHeader {
+    Write-Host "[ P I M   G R O U P S ]" -ForegroundColor Cyan
+}
+
+function Invoke-GroupsPIMExit {
+    param(
+        [string]$Message = "Exiting..."
+    )
+
+    [Console]::CursorVisible = $true
+    Clear-Host
+    Write-Host $Message -ForegroundColor Yellow
+
+    try {
+        Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+        Write-Host "✅ Disconnected from Microsoft Graph." -ForegroundColor Green
+    } catch {
+        Write-Host "ℹ️ Already disconnected from Microsoft Graph." -ForegroundColor DarkGray
+    }
+
+    Write-Host ""
+    exit 0
+}
+
+function Get-EligibleGroupsOptimized {
+    param([string]$CurrentUserId)
+
+    $allEligibleGroups = @()
+    $activeGroupKeys = @()
+
+    try {
+        $swTotal = [System.Diagnostics.Stopwatch]::StartNew()
+
+        # Fetch eligible group assignments
+        $sw1 = [System.Diagnostics.Stopwatch]::StartNew()
+        $eligibleUri = "https://graph.microsoft.com/v1.0/identityGovernance/privilegedAccess/group/eligibilitySchedules?`$filter=principalId eq '$CurrentUserId'&`$expand=group"
+        $eligibleResponse = Invoke-MgGraphRequest -Method GET -Uri $eligibleUri -ErrorAction Stop
+        $eligibleSchedules = if ($eligibleResponse -and $eligibleResponse.value) { $eligibleResponse.value } else { @() }
+        $sw1.Stop()
+        Write-Host " [E:$($sw1.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
+
+        # Fetch active group assignments to filter them out
+        $sw2 = [System.Diagnostics.Stopwatch]::StartNew()
+        try {
+            $activeUri = "https://graph.microsoft.com/v1.0/identityGovernance/privilegedAccess/group/assignmentScheduleInstances?`$filter=principalId eq '$CurrentUserId'"
+            $activeResponse = Invoke-MgGraphRequest -Method GET -Uri $activeUri -ErrorAction Stop
+            $activeAssignments = if ($activeResponse -and $activeResponse.value) { $activeResponse.value } else { @() }
+        } catch { $activeAssignments = @() }
+        $sw2.Stop()
+        Write-Host " [A:$($sw2.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
+
+        # Build active keys for filtering
+        foreach ($active in $activeAssignments) {
+            $activeGroupKeys += "$($active.groupId):$($active.accessId)"
+        }
+
+        # Build eligible group objects
+        $sw3 = [System.Diagnostics.Stopwatch]::StartNew()
+        foreach ($schedule in $eligibleSchedules) {
+            $groupName = if ($schedule.group -and $schedule.group.displayName) { $schedule.group.displayName } else { $schedule.groupId }
+            $allEligibleGroups += [PSCustomObject]@{
+                GroupName   = $groupName
+                GroupId     = $schedule.groupId
+                AccessId    = $schedule.accessId
+                PrincipalId = $schedule.principalId
+            }
+        }
+        $sw3.Stop()
+        Write-Host " [C:$($sw3.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
+
+        $swTotal.Stop()
+        Write-Host " [T:$($swTotal.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray
+    } catch {
+        Write-Host " Err: $($_.Exception.Message)" -ForegroundColor Red
+        $allEligibleGroups = @()
+    }
+
+    # Filter out active groups
+    $eligibleGroups = $allEligibleGroups | Where-Object {
+        $key = "$($_.GroupId):$($_.AccessId)"
+        $activeGroupKeys -notcontains $key
+    }
+
+    return $eligibleGroups
+}
+
+function Get-ActiveGroupsOptimized {
+    param([string]$CurrentUserId)
+
+    $activeGroups = @()
+    try {
+        $uri = "https://graph.microsoft.com/v1.0/identityGovernance/privilegedAccess/group/assignmentScheduleInstances?`$filter=principalId eq '$CurrentUserId'&`$expand=group"
+        $response = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
+        $instances = if ($response -and $response.value) { $response.value } else { @() }
+
+        foreach ($instance in $instances) {
+            $groupName = if ($instance.group -and $instance.group.displayName) { $instance.group.displayName } else { $instance.groupId }
+
+            $expirationTime = $null
+            if ($instance.endDateTime) {
+                $expirationTime = [DateTime]::Parse($instance.endDateTime, [System.Globalization.CultureInfo]::InvariantCulture).ToLocalTime()
+            }
+
+            $activeGroups += [PSCustomObject]@{
+                GroupName = $groupName
+                Assignment = [PSCustomObject]@{
+                    Id          = $instance.id
+                    GroupId     = $instance.groupId
+                    AccessId    = $instance.accessId
+                    PrincipalId = $instance.principalId
+                    StartDateTime = $instance.startDateTime
+                    EndDateTime = $instance.endDateTime
+                }
+                ExpirationTime = $expirationTime
+            }
+        }
+    } catch {
+        $activeGroups = @()
+    }
+
+    return $activeGroups
+}
+
+function Submit-GroupActivation {
+    param(
+        [Parameter(Mandatory)]
+        [PSCustomObject]$EligibleGroup,
+        [Parameter(Mandatory)]
+        [string]$Justification,
+        [Parameter(Mandatory)]
+        [string]$Duration
+    )
+
+    try {
+        $body = @{
+            accessId    = "member"
+            principalId = $EligibleGroup.PrincipalId
+            groupId     = $EligibleGroup.GroupId
+            action      = "selfActivate"
+            justification = $Justification
+            scheduleInfo = @{
+                startDateTime = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+                expiration = @{
+                    type     = "afterDuration"
+                    duration = $Duration
+                }
+            }
+        }
+
+        $uri = "https://graph.microsoft.com/v1.0/identityGovernance/privilegedAccess/group/assignmentScheduleRequests"
+        $result = Invoke-MgGraphRequest -Method POST -Uri $uri -Body $body -ContentType "application/json" -ErrorAction Stop
+
+        return @{ Success = $true; Status = $result.status; Error = $null; ClaimsChallenge = $null }
+    } catch {
+        $errorMsg = $_.Exception.Message
+
+        # Check for Conditional Access claims challenge (step-up authentication required)
+        if ($errorMsg -like "*AcrsValidationFailed*" -or $errorMsg -like "*&claims=*") {
+            $claimsMatch = [regex]::Match($errorMsg, '&claims=([^&\s\]]+)')
+            if ($claimsMatch.Success) {
+                $encodedClaims = $claimsMatch.Groups[1].Value
+                $decodedClaims = [System.Web.HttpUtility]::UrlDecode($encodedClaims)
+                return @{ Success = $false; Status = "ClaimsChallenge"; Error = $errorMsg; ClaimsChallenge = $decodedClaims }
+            }
+        }
+
+        if ($errorMsg -match "already exists" -or $errorMsg -match "RoleAssignmentExists") {
+            $errorMsg = "Already active"
+        }
+        return @{ Success = $false; Status = "Failed"; Error = $errorMsg; ClaimsChallenge = $null }
+    }
+}
+
+function Submit-GroupDeactivation {
+    param(
+        [Parameter(Mandatory)]
+        [PSCustomObject]$ActiveGroup
+    )
+
+    try {
+        $body = @{
+            accessId    = "member"
+            principalId = $ActiveGroup.Assignment.PrincipalId
+            groupId     = $ActiveGroup.Assignment.GroupId
+            action      = "selfDeactivate"
+        }
+
+        $uri = "https://graph.microsoft.com/v1.0/identityGovernance/privilegedAccess/group/assignmentScheduleRequests"
+        $result = Invoke-MgGraphRequest -Method POST -Uri $uri -Body $body -ContentType "application/json" -ErrorAction Stop
+
+        return @{ Success = $true; Error = $null }
+    } catch {
+        $errorMsg = $_.Exception.Message
+        if ($errorMsg -match "does not exist|not found") {
+            $errorMsg = "Group membership already deactivated"
+        }
+        return @{ Success = $false; Error = $errorMsg }
+    }
+}
+
+function Show-GroupsDeactivationCountdown {
+    param([array]$TooNewGroups)
+
+    try {
+        [Console]::CursorVisible = $false
+
+        Clear-Host
+        Show-GroupsPIMHeader
+        Write-Host ""
+        Write-Host "⏰ Time Remaining Until Groups Can Be Deactivated" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "   (5-minute minimum activation period required)" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "   The deactivation menu will automatically refresh when timers expire" -ForegroundColor Cyan
+        Write-Host ""
+
+        # Remember the starting line for groups
+        $groupStartLine = [Console]::CursorTop
+
+        # Deduplicate groups by name
+        $uniqueGroups = @{}
+        $deduplicatedGroups = @()
+        foreach ($groupInfo in $TooNewGroups) {
+            if (-not $uniqueGroups.ContainsKey($groupInfo.GroupName)) {
+                $uniqueGroups[$groupInfo.GroupName] = $true
+                $deduplicatedGroups += $groupInfo
+            }
+        }
+
+        # Show initial group lines
+        foreach ($groupInfo in $deduplicatedGroups) {
+            Write-Host "  ⏳ $($groupInfo.GroupName): --:-- remaining" -ForegroundColor Cyan
+        }
+        Write-Host ""
+        Write-Host "  ← Back" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
+
+        do {
+            $allReady = $true
+
+            # Update each group's countdown in place
+            for ($i = 0; $i -lt $deduplicatedGroups.Count; $i++) {
+                $groupInfo = $deduplicatedGroups[$i]
+                try {
+                    $activationTime = $groupInfo.ActivationTime
+                    $deactivationTime = $activationTime.AddMinutes(5)
+                    $timeRemaining = $deactivationTime - (Get-Date)
+
+                    # Position cursor at this group's line
+                    $lineNumber = $groupStartLine + $i
+                    [Console]::SetCursorPosition(0, $lineNumber)
+
+                    if ($timeRemaining.TotalSeconds -gt 0) {
+                        $allReady = $false
+                        $minutes = [int][math]::Floor($timeRemaining.TotalMinutes)
+                        $seconds = [int][math]::Floor($timeRemaining.TotalSeconds % 60)
+                        $timeDisplay = "{0:D2}:{1:D2}" -f $minutes, $seconds
+
+                        Write-Host "  ⏳ $($groupInfo.GroupName): $timeDisplay remaining" -ForegroundColor Cyan -NoNewline
+                        Write-Host (" " * ([Console]::WindowWidth - [Console]::CursorLeft - 1))
+                    } else {
+                        Write-Host "  ✅ $($groupInfo.GroupName): Ready for deactivation!" -ForegroundColor Green -NoNewline
+                        Write-Host (" " * ([Console]::WindowWidth - [Console]::CursorLeft - 1))
+                    }
+                } catch {
+                    $lineNumber = $groupStartLine + $i
+                    [Console]::SetCursorPosition(0, $lineNumber)
+                    Write-Host (" " * ([Console]::WindowWidth - 1)) -NoNewline
+                    [Console]::SetCursorPosition(0, $lineNumber)
+                    Write-Host "  ❓ $($groupInfo.GroupName): Unable to check" -ForegroundColor Yellow
+                }
+            }
+
+            # Check if user pressed a key
+            if ([Console]::KeyAvailable) {
+                $key = [Console]::ReadKey($true)
+                if (Test-QuitShortcut -Key $key) {
+                    Invoke-GroupsPIMExit
+                } else {
+                    # Any other key = go back
+                    return "BACK"
+                }
+            }
+
+            if (-not $allReady) {
+                Start-Sleep -Seconds 1
+            }
+
+        } while (-not $allReady)
+
+        [Console]::CursorVisible = $false
+        return $true
+    } catch {
+        Write-Host "Error in countdown: $($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }
+}
+
+function Show-GroupsDynamicExpirationMenu {
+    param(
+        [array]$GroupExpirationData,
+        [string]$Title
+    )
+
+    [Console]::CursorVisible = $false
+    $currentIndex = 0
+    $selected = @()
+    for ($i = 0; $i -lt $GroupExpirationData.Count; $i++) {
+        $selected += $false
+    }
+
+    try {
+        do {
+            Clear-Host
+            Show-GroupsPIMHeader
+            Write-Host ""
+            Write-Host $Title -ForegroundColor Cyan
+            Write-Host ("=" * $Title.Length) -ForegroundColor Cyan
+            Write-Host ""
+
+            # Filter out expired groups and check if any remain
+            $activeGroupData = @()
+            $activeSelected = @()
+
+            for ($i = 0; $i -lt $GroupExpirationData.Count; $i++) {
+                $groupData = $GroupExpirationData[$i]
+                $expirationTime = $groupData.ExpirationTime
+
+                # Calculate countdown
+                $isExpired = $false
+                if ($expirationTime) {
+                    $timeRemaining = $expirationTime - (Get-Date)
+
+                    if ($timeRemaining.TotalSeconds -gt 0) {
+                        $hours = [Math]::Floor($timeRemaining.TotalHours)
+                        $minutes = $timeRemaining.Minutes
+                        $seconds = $timeRemaining.Seconds
+
+                        if ($hours -gt 0) {
+                            $countdownText = "expires in ${hours}h ${minutes}m ${seconds}s"
+                        } else {
+                            $countdownText = "expires in ${minutes}m ${seconds}s"
+                        }
+                    } else {
+                        $countdownText = "expired"
+                        $isExpired = $true
+                    }
+                } else {
+                    $countdownText = "no expiration data"
+                }
+
+                # Only include non-expired groups
+                if (-not $isExpired) {
+                    $activeGroupData += @{
+                        DisplayName    = $groupData.DisplayName
+                        ExpirationTime = $expirationTime
+                        CountdownText  = $countdownText
+                        OriginalIndex  = $i
+                    }
+                    $activeSelected += $selected[$i]
+                }
+            }
+
+            # Check if all groups expired
+            if ($activeGroupData.Count -eq 0) {
+                Write-Host "ℹ️  All group memberships have expired." -ForegroundColor Gray
+                Write-Host ""
+                Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
+                do {
+                    $key = [Console]::ReadKey($true)
+                    if (Test-QuitShortcut -Key $key) { Invoke-GroupsPIMExit }
+                } while ($true)
+            }
+
+            # Update arrays to only include active groups
+            $selected = $activeSelected
+
+            # Calculate total display items (groups + back item)
+            $backIndex = $activeGroupData.Count
+            $totalDisplayItems = $activeGroupData.Count + 1
+
+            if ($currentIndex -ge $totalDisplayItems) {
+                $currentIndex = $totalDisplayItems - 1
+            }
+
+            # Display active groups with dynamic countdown
+            for ($i = 0; $i -lt $activeGroupData.Count; $i++) {
+                $groupInfo = $activeGroupData[$i]
+
+                $checkbox = if ($selected[$i]) { "[✓]" } else { "[ ]" }
+                $arrow = if ($i -eq $currentIndex) { "► " } else { "  " }
+
+                Write-Host "$arrow$checkbox $($groupInfo.DisplayName) ($($groupInfo.CountdownText))" -ForegroundColor $(if ($i -eq $currentIndex) { "Yellow" } else { "White" })
+            }
+
+            # Show Back item
+            $backArrow = if ($currentIndex -eq $backIndex) { "► " } else { "  " }
+            $backColor = if ($currentIndex -eq $backIndex) { "Yellow" } else { "Gray" }
+            Write-Host "$backArrow← Back" -ForegroundColor $backColor
+
+            Write-Host ""
+            $selectedCount = ($selected | Where-Object { $_ }).Count
+            Write-Host "Groups Selected: $selectedCount" -ForegroundColor Green
+            Write-Host ""
+            Write-Host "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | $(Get-HelpShortcutText) | $(Get-QuitShortcutText)" -ForegroundColor Magenta
+
+            # Handle input with timeout for countdown updates
+            $inputAvailable = $false
+            $timeout = 1000
+            $startTime = Get-Date
+
+            while (((Get-Date) - $startTime).TotalMilliseconds -lt $timeout -and -not $inputAvailable) {
+                if ([Console]::KeyAvailable) {
+                    $inputAvailable = $true
+                    break
+                }
+                Start-Sleep -Milliseconds 50
+            }
+
+            if ($inputAvailable) {
+                $key = [Console]::ReadKey($true)
+
+                switch ($key.Key) {
+                    "UpArrow" {
+                        if ($currentIndex -gt 0) { $currentIndex-- } else { $currentIndex = $totalDisplayItems - 1 }
+                    }
+                    "DownArrow" {
+                        if ($currentIndex -lt ($totalDisplayItems - 1)) { $currentIndex++ } else { $currentIndex = 0 }
+                    }
+                    "Spacebar" {
+                        if ($currentIndex -eq $backIndex) {
+                            return "BACK"
+                        }
+                        $selected[$currentIndex] = -not $selected[$currentIndex]
+                    }
+                    "Enter" {
+                        if ($currentIndex -eq $backIndex) {
+                            return "BACK"
+                        }
+                        $selectedIndices = @()
+                        for ($i = 0; $i -lt $selected.Count; $i++) {
+                            if ($selected[$i]) {
+                                $selectedIndices += $i
+                            }
+                        }
+                        Clear-Host
+                        return $selectedIndices
+                    }
+                    "Escape" {
+                        return "BACK"
+                    }
+                }
+
+                # Handle Ctrl+A to select/deselect all
+                if ($key.Modifiers -eq "Control" -and $key.Key -eq "A") {
+                    $allSelected = ($selected | Where-Object { $_ -eq $true }).Count -eq $selected.Count
+                    for ($i = 0; $i -lt $selected.Count; $i++) {
+                        $selected[$i] = -not $allSelected
+                    }
+                }
+
+                # Handle Ctrl+H for help menu
+                if ($key.Modifiers -eq "Control" -and $key.Key -eq "H") {
+                    Show-HelpMenu
+                }
+
+                # Handle Ctrl+Q
+                if (Test-QuitShortcut -Key $key) {
+                    Invoke-GroupsPIMExit
+                }
+            }
+
+        } while ($true)
+    }
+    finally {
+        # Keep cursor hidden - calling code manages visibility
+    }
+}
+
+function Start-GroupActivationWorkflow {
+    param(
+        [array]$EligibleGroups,
+        [string]$CurrentUserId
+    )
+
+    if ($EligibleGroups.Count -eq 0) {
+        Clear-Host
+        Show-GroupsPIMHeader
+        Write-Host ""
+        Write-Host "❌ No eligible groups available for activation." -ForegroundColor Red
+        Write-Host ""
+
+        # Check if there are active groups to offer deactivation
+        $activeGroups = Get-ActiveGroupsOptimized -CurrentUserId $CurrentUserId
+        if ($activeGroups.Count -gt 0) {
+            Write-Host "Would you like to deactivate groups instead? (Y/N): " -NoNewline -ForegroundColor Cyan
+
+            [Console]::CursorVisible = $true
+
+            $promptLeft = [Console]::CursorLeft
+            $promptTop = [Console]::CursorTop
+
+            Write-Host "`n"
+            Write-Host "Y/N to choose | $(Get-QuitShortcutText)" -ForegroundColor Magenta
+
+            [Console]::SetCursorPosition($promptLeft, $promptTop)
+
+            $userInput = ""
+            do {
+                $key = [Console]::ReadKey($true)
+
+                if (Test-QuitShortcut -Key $key) {
+                    Invoke-GroupsPIMExit
+                    return
+                }
+
+                if ($key.Key -eq 'Enter') {
+                    if ($userInput -eq 'Y') {
+                        Start-GroupDeactivationWorkflow -ActiveGroups $activeGroups -CurrentUserId $CurrentUserId
+                        return
+                    } elseif ($userInput -eq 'N') {
+                        Clear-Host
+                        Show-GroupsPIMHeader
+                        Write-Host ""
+                        Write-Host "❌ No group management workflows available." -ForegroundColor Yellow
+                        Write-Host ""
+                        Write-Host "Check back later when groups are approved or activated." -ForegroundColor Gray
+                        Write-Host ""
+                        Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
+
+                        [Console]::CursorVisible = $false
+                        do {
+                            $k = [Console]::ReadKey($true)
+                            if (Test-QuitShortcut -Key $k) {
+                                Invoke-GroupsPIMExit
+                            }
+                        } while ($true)
+                        return
+                    } else {
+                        Write-Host ""
+                        Write-Host "Please enter Y or N: " -NoNewline -ForegroundColor Yellow
+                        $promptLeft = [Console]::CursorLeft
+                        $promptTop = [Console]::CursorTop
+                        Write-Host "`n"
+                        Write-Host "Y/N to choose | $(Get-QuitShortcutText)" -ForegroundColor Magenta
+                        [Console]::SetCursorPosition($promptLeft, $promptTop)
+                        $userInput = ""
+                    }
+                }
+                elseif ($key.Key -eq 'Backspace' -and $userInput.Length -gt 0) {
+                    $userInput = $userInput.Substring(0, $userInput.Length - 1)
+                    Write-Host "`b `b" -NoNewline
+                }
+                elseif ($key.KeyChar -match '[YyNn]' -and $userInput.Length -eq 0) {
+                    $userInput = $key.KeyChar.ToString().ToUpper()
+                    Write-Host $userInput -NoNewline -ForegroundColor Green
+                }
+            } while ($true)
+        } else {
+            Write-Host "❌ No group management workflows available." -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "Check back later when groups are approved or activated." -ForegroundColor Gray
+            Write-Host ""
+            Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
+
+            do {
+                $key = [Console]::ReadKey($true)
+                if (Test-QuitShortcut -Key $key) {
+                    Invoke-GroupsPIMExit
+                }
+            } while ($true)
+        }
+        return
+    }
+
+    # Build group items for display
+    $groupItems = @()
+    foreach ($group in $EligibleGroups) {
+        $groupItems += $group.GroupName
+    }
+
+    # Show checkbox menu for group selection with back option
+    $selectedIndices = Show-CheckboxMenu -Items $groupItems -Title "Select Groups to Activate" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -ShowBack
+
+    if ($selectedIndices -eq "BACK") {
+        return
+    }
+
+    if ($null -eq $selectedIndices -or $selectedIndices.Count -eq 0) {
+        return
+    }
+
+    # Get selected groups
+    $groupsToActivate = @()
+    foreach ($idx in $selectedIndices) {
+        $groupsToActivate += $EligibleGroups[$idx]
+    }
+
+    # Clear and show header for activation wizard
+    Clear-Host
+    Show-GroupsPIMHeader
+    Write-Host ""
+
+    # Duration input - same as Entra/Azure workflow
+    do {
+        $durationInput = Read-PIMInput -Prompt "Enter activation duration (e.g., 1H, 30M, 2H30M)" -ControlsText $script:ControlMessages['Input']
+
+        if ([string]::IsNullOrWhiteSpace($durationInput) -or $durationInput -notmatch '^\d+[HM]') {
+            Write-Host "ERROR: Invalid format. Use '1H', '30M', or '2H30M'." -ForegroundColor Red
+        }
+    } while ([string]::IsNullOrWhiteSpace($durationInput) -or $durationInput -notmatch '^\d+[HM]')
+
+    # Convert duration to ISO 8601 format
+    $duration = $durationInput.ToUpper() -replace '(\d+)H', 'PT${1}H' -replace '(\d+)M', '${1}M'
+    if ($duration -match '^\d+M$') { $duration = "PT$duration" }
+
+    # Parse duration to check if it's less than 5 minutes
+    $totalMinutes = 0
+    if ($durationInput.ToUpper() -match '(\d+)H') { $totalMinutes += [int]$matches[1] * 60 }
+    if ($durationInput.ToUpper() -match '(\d+)M') { $totalMinutes += [int]$matches[1] }
+
+    if ($totalMinutes -lt 5) {
+        Write-Host ""
+        Write-Host "❌ Activation Duration too short: Minimum Required is 5 minutes." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Press any key to continue..." -ForegroundColor Yellow
+        $null = [Console]::ReadKey($true)
+        return
+    }
+
+    # Justification input
+    $justification = Read-PIMInput -Prompt "Enter reason for activation" -ControlsText $script:ControlMessages['Input']
+
+    if ([string]::IsNullOrWhiteSpace($justification)) {
+        Write-Host "Justification is required." -ForegroundColor Red
+        return
+    }
+
+    Write-Host "🔄 Activating $($groupsToActivate.Count) group(s)..." -ForegroundColor Cyan
+    Write-Host ""
+
+    $successCount = 0
+    $failCount = 0
+
+    foreach ($group in $groupsToActivate) {
+        $groupName = $group.GroupName
+        $result = Submit-GroupActivation -EligibleGroup $group -Justification $justification -Duration $duration
+
+        if ($result.Success) {
+            if ($result.Status -eq "PendingApproval") {
+                Write-Host "⏳ Group activation submitted for: $groupName (pending approval)" -ForegroundColor Yellow
+            } else {
+                Write-Host "✅ Group activation submitted for: $groupName" -ForegroundColor Green
+            }
+            $successCount++
+        } elseif ($result.ClaimsChallenge) {
+            # Conditional Access requires step-up authentication (ACRS claim)
+            Write-Host "🔐 $groupName requires additional authentication (Conditional Access)..." -ForegroundColor Yellow
+
+            try {
+                # Get new token with claims challenge using Graph scopes
+                $scopes = @(
+                    'PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup',
+                    'PrivilegedAccess.ReadWrite.AzureADGroup',
+                    'RoleManagementPolicy.Read.AzureADGroup'
+                )
+                $newToken = Get-BrowserAccessTokenWithClaims -Scopes $scopes -Claims $result.ClaimsChallenge
+
+                if ($newToken) {
+                    # Reconnect to Graph with new token
+                    $secureToken = ConvertTo-SecureString $newToken -AsPlainText -Force
+                    Connect-MgGraph -AccessToken $secureToken -NoWelcome -ErrorAction Stop
+
+                    # Retry the activation request
+                    $retryResult = Submit-GroupActivation -EligibleGroup $group -Justification $justification -Duration $duration
+                    if ($retryResult.Success) {
+                        if ($retryResult.Status -eq "PendingApproval") {
+                            Write-Host "⏳ Group activation submitted for: $groupName (pending approval)" -ForegroundColor Yellow
+                        } else {
+                            Write-Host "✅ Group activation submitted for: $groupName" -ForegroundColor Green
+                        }
+                        $successCount++
+                    } else {
+                        Write-Host "❌ Failed to activate: $groupName - $($retryResult.Error)" -ForegroundColor Red
+                        $failCount++
+                    }
+                } else {
+                    Write-Host "❌ Failed to activate: $groupName - Step-up authentication failed" -ForegroundColor Red
+                    $failCount++
+                }
+            } catch {
+                Write-Host "❌ Failed to activate: $groupName - $($_.Exception.Message)" -ForegroundColor Red
+                $failCount++
+            }
+        } else {
+            Write-Host "❌ Failed to activate: $groupName - $($result.Error)" -ForegroundColor Red
+            $failCount++
+        }
+    }
+
+    Write-Host ""
+    if ($successCount -gt 0 -and $failCount -gt 0) {
+        Write-Host "⚠️ Activated $successCount group(s), $failCount failed" -ForegroundColor Yellow
+    } elseif ($failCount -gt 0 -and $successCount -eq 0) {
+        Write-Host "❌ Failed to activate $failCount group(s)" -ForegroundColor Red
+    }
+
+    Write-Host ""
+
+    # Ask if user wants to manage more groups
+    do {
+        [Console]::CursorVisible = $true
+        $userInput = Read-PIMInput -Prompt "Would you like to manage more groups? (Y/N)" -ControlsText $script:ControlMessages['Exit']
+        if (-not $userInput) { continue }
+        $userInput = $userInput.Trim().ToUpper()
+        if ($userInput -eq "Y" -or $userInput -eq "YES") {
+            $continueChoice = "Yes"
+            break
+        } elseif ($userInput -eq "N" -or $userInput -eq "NO") {
+            $continueChoice = "No"
+            break
+        } else {
+            Write-Host "Please enter Y or N." -ForegroundColor Yellow
+        }
+    } while ($true)
+
+    if ($continueChoice -eq "Yes") {
+        return
+    } else {
+        Write-Host "No additional groups will be managed." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Please close the terminal." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
+
+        [Console]::CursorVisible = $false
+        do {
+            if ([Console]::KeyAvailable) {
+                $key = [Console]::ReadKey($true)
+                if (Test-QuitShortcut -Key $key) {
+                    Invoke-GroupsPIMExit
+                    return
+                }
+            }
+            Start-Sleep -Milliseconds 100
+        } while ($true)
+    }
+}
+
+function Start-GroupDeactivationWorkflow {
+    param(
+        [array]$ActiveGroups,
+        [string]$CurrentUserId
+    )
+
+    [Console]::CursorVisible = $false
+    if ($ActiveGroups.Count -eq 0) {
+        Write-Host ""
+        Write-Host "ℹ️  No active groups to deactivate at this time." -ForegroundColor Gray
+        Write-Host ""
+
+        $response = Read-PIMInput -Prompt "Would you like to activate groups instead? (Y/N)" -ForegroundColor Cyan
+
+        if ($response) {
+            $userInput = $response.Trim().ToUpper()
+            if ($userInput -eq "Y" -or $userInput -eq "YES") {
+                Clear-Host
+                Show-GroupsPIMHeader
+                Write-Host ""
+                Write-Host "🔄 Loading eligible groups..." -ForegroundColor Cyan -NoNewline
+                $eligibleGroups = Get-EligibleGroupsOptimized -CurrentUserId $CurrentUserId
+                if ($eligibleGroups.Count -gt 0) {
+                    Write-Host " ✅ $($eligibleGroups.Count) found" -ForegroundColor Green
+                    Start-GroupActivationWorkflow -EligibleGroups $eligibleGroups -CurrentUserId $CurrentUserId
+                } else {
+                    Write-Host ""
+                    Write-Host ""
+                    Write-Host "❌ No eligible groups available for activation." -ForegroundColor Red
+                    Write-Host ""
+                    Write-Host "Press Enter to exit..." -ForegroundColor Yellow
+                    Read-Host
+                }
+            }
+        }
+        return
+    }
+
+    # Check for groups that are too new to deactivate (5-minute rule)
+    $readyToDeactivate = @()
+    $tooNewGroups = @()
+
+    foreach ($group in $ActiveGroups) {
+        try {
+            $assignment = $group.Assignment
+            if ($assignment.StartDateTime) {
+                $activationTime = [DateTime]::Parse($assignment.StartDateTime, [System.Globalization.CultureInfo]::InvariantCulture).ToLocalTime()
+                $timeSinceActivation = (Get-Date) - $activationTime
+
+                if ($timeSinceActivation.TotalMinutes -lt 5) {
+                    $tooNewGroups += [PSCustomObject]@{
+                        GroupName      = $group.GroupName
+                        ActivationTime = $activationTime
+                        Group          = $group
+                    }
+                } else {
+                    $readyToDeactivate += $group
+                }
+            } else {
+                $readyToDeactivate += $group
+            }
+        } catch {
+            $readyToDeactivate += $group
+        }
+    }
+
+    # If some groups are too new, show countdown
+    if ($tooNewGroups.Count -gt 0) {
+        [Console]::CursorVisible = $false
+        Clear-Host
+        Show-GroupsPIMHeader
+        Write-Host ""
+
+        if ($readyToDeactivate.Count -eq 0) {
+            Write-Host "⏰ All groups are within the 5-minute activation period." -ForegroundColor Yellow
+        } else {
+            Write-Host "⏰ Some groups are within the 5-minute activation period." -ForegroundColor Yellow
+        }
+        Write-Host "Showing countdown until they can be deactivated..." -ForegroundColor Cyan
+        Write-Host ""
+
+        $countdownResult = Show-GroupsDeactivationCountdown -TooNewGroups $tooNewGroups
+
+        if ($countdownResult -eq $true) {
+            Start-GroupDeactivationWorkflow -ActiveGroups $ActiveGroups -CurrentUserId $CurrentUserId
+        }
+        return
+    }
+
+    # Build group expiration data for dynamic countdown menu
+    $groupExpirationData = @()
+    foreach ($group in $readyToDeactivate) {
+        $groupExpirationData += [PSCustomObject]@{
+            DisplayName    = $group.GroupName
+            ExpirationTime = $group.ExpirationTime
+        }
+    }
+
+    # Show dynamic countdown menu with live expiration timers and back option
+    $selectedIndices = Show-GroupsDynamicExpirationMenu -GroupExpirationData $groupExpirationData -Title "🔄 Select Groups to Deactivate"
+
+    if ($selectedIndices -eq "BACK") {
+        return
+    }
+
+    if ($null -eq $selectedIndices -or $selectedIndices.Count -eq 0) {
+        return
+    }
+
+    # Get selected groups
+    $groupsToDeactivate = @()
+    foreach ($idx in $selectedIndices) {
+        $groupsToDeactivate += $readyToDeactivate[$idx]
+    }
+
+    # Deactivate groups
+    Clear-Host
+    Show-GroupsPIMHeader
+    Write-Host ""
+    Write-Host "🔄 Deactivating $($groupsToDeactivate.Count) group(s)..." -ForegroundColor Cyan
+    Write-Host ""
+
+    $successCount = 0
+    $failCount = 0
+
+    foreach ($group in $groupsToDeactivate) {
+        $groupName = $group.GroupName
+        $result = Submit-GroupDeactivation -ActiveGroup $group
+        if ($result.Success) {
+            Write-Host "✅ Successfully deactivated: $groupName" -ForegroundColor Green
+            $successCount++
+        } else {
+            Write-Host "❌ Failed to deactivate: $groupName - $($result.Error)" -ForegroundColor Red
+            $failCount++
+        }
+    }
+
+    Write-Host ""
+    if ($successCount -gt 0 -and $failCount -gt 0) {
+        Write-Host "⚠️ Deactivated $successCount group(s), $failCount failed" -ForegroundColor Yellow
+    } elseif ($failCount -gt 0 -and $successCount -eq 0) {
+        Write-Host "❌ Failed to deactivate $failCount group(s)" -ForegroundColor Red
+    }
+
+    Write-Host ""
+
+    # Ask if user wants to manage more groups
+    do {
+        [Console]::CursorVisible = $true
+        $userInput = Read-PIMInput -Prompt "Would you like to manage more groups? (Y/N)" -ControlsText $script:ControlMessages['Exit']
+        if (-not $userInput) { continue }
+        $userInput = $userInput.Trim().ToUpper()
+        if ($userInput -eq "Y" -or $userInput -eq "YES") {
+            $continueChoice = "Yes"
+            break
+        } elseif ($userInput -eq "N" -or $userInput -eq "NO") {
+            $continueChoice = "No"
+            break
+        } else {
+            Write-Host "Please enter Y or N." -ForegroundColor Yellow
+        }
+    } while ($true)
+
+    if ($continueChoice -eq "Yes") {
+        return
+    } else {
+        Write-Host "No additional groups will be managed." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Please close the terminal." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
+
+        [Console]::CursorVisible = $false
+        do {
+            if ([Console]::KeyAvailable) {
+                $key = [Console]::ReadKey($true)
+                if (Test-QuitShortcut -Key $key) {
+                    Invoke-GroupsPIMExit
+                    return
+                }
+            }
+            Start-Sleep -Milliseconds 100
+        } while ($true)
+    }
+}
+
+function Start-GroupsPIMRoleManagement {
+    param(
+        [string]$CurrentUserId
+    )
+
+    do {
+        [Console]::CursorVisible = $false
+        Clear-Host
+        Show-GroupsPIMHeader
+
+        $menuItems = @(
+            "Activate Groups",
+            "Deactivate Groups"
+        )
+
+        $selectedIndices = Show-CheckboxMenu -Items $menuItems -Title "🔄 Choose Action" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -SingleSelection -ShowBack
+
+        # Back returns to workflow selector
+        if ($selectedIndices -eq "BACK") {
+            return
+        }
+
+        if ($selectedIndices.Count -eq 0) {
+            return
+        }
+
+        $selectedIndex = $selectedIndices[0]
+        $selectedAction = $menuItems[$selectedIndex]
+
+        [Console]::CursorVisible = $false
+
+        if ($selectedAction -eq "Activate Groups") {
+            Clear-Host
+            Show-GroupsPIMHeader
+            Write-Host ""
+            Write-Host "🔄 Loading eligible groups..." -ForegroundColor Cyan -NoNewline
+            $eligibleGroups = Get-EligibleGroupsOptimized -CurrentUserId $CurrentUserId
+            if ($eligibleGroups.Count -gt 0) {
+                Write-Host " ✅ $($eligibleGroups.Count) found" -ForegroundColor Green
+            } else {
+                Write-Host ""
+                Write-Host ""
+            }
+            Start-GroupActivationWorkflow -EligibleGroups $eligibleGroups -CurrentUserId $CurrentUserId
+        } elseif ($selectedAction -eq "Deactivate Groups") {
+            Clear-Host
+            Show-GroupsPIMHeader
+            Write-Host ""
+            Write-Host "🔄 Loading active groups..." -ForegroundColor Cyan -NoNewline
+            $activeGroups = Get-ActiveGroupsOptimized -CurrentUserId $CurrentUserId
+            if ($activeGroups.Count -gt 0) {
+                Write-Host " ✅ $($activeGroups.Count) found" -ForegroundColor Green
+            } else {
+                Write-Host ""
+            }
+            Start-GroupDeactivationWorkflow -ActiveGroups $activeGroups -CurrentUserId $CurrentUserId
+        }
+    } while ($true)
+}
+
+function Start-GroupsPIMWorkflow {
+    $script:CurrentWorkflow = 'Groups'
+
+    # Pre-load MSAL and compile helper BEFORE Graph modules load their own MSAL
+    $msalInitialized = Initialize-MSALAssemblies
+    if ($msalInitialized) {
+        try {
+            $null = Initialize-MSALHelper
+        } catch {
+            Write-Host "MSAL Helper compile error: $($_.Exception.Message)" -ForegroundColor Red
+            $msalInitialized = $false
+        }
+    }
+
+    # Only need Microsoft.Graph.Authentication for REST calls via Invoke-MgGraphRequest
+    $requiredGraphModules = @(
+        "Microsoft.Graph.Authentication"
+    )
+
+    Clear-Host
+    Write-Host ""
+    Write-Host "[ P I M   G R O U P S ]" -ForegroundColor Cyan
+    Write-Host "    with PowerShell" -ForegroundColor DarkGray
+    Write-Host ""
+
+    Write-Host "Loading Microsoft Graph modules..." -ForegroundColor Cyan
+    Write-Host ""
+
+    $barWidth = 30
+    $currentModule = 0
+    $totalModules = $requiredGraphModules.Count
+
+    foreach ($module in $requiredGraphModules) {
+        $currentModule++
+        $percent = [math]::Floor(($currentModule / $totalModules) * 100)
+        $filled = [math]::Floor(($currentModule / $totalModules) * $barWidth)
+        $empty = $barWidth - $filled
+        $bar = "█" * $filled + "░" * $empty
+
+        Write-Host "  [$bar] $percent% " -NoNewline -ForegroundColor Yellow
+        Write-Host "Loading: " -NoNewline -ForegroundColor Gray
+        Write-Host "$module" -ForegroundColor White
+
+        Import-Module $module -Force -ErrorAction SilentlyContinue
+    }
+
+    Write-Host ""
+    Write-Host "  ✓ All modules ready!" -ForegroundColor Green
+    Write-Host ""
+
+    # Authenticate to Microsoft Graph with group-specific scopes
+    [Console]::CursorVisible = $false
+
+    try {
+        $scopes = @(
+            'PrivilegedEligibilitySchedule.Read.AzureADGroup',
+            'PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup',
+            'PrivilegedAccess.Read.AzureADGroup',
+            'PrivilegedAccess.ReadWrite.AzureADGroup',
+            'RoleManagementPolicy.Read.AzureADGroup',
+            'User.Read'
+        )
+        $connected = Connect-MgGraphWithBrowser -Scopes $scopes
+
+        if (-not $connected) {
+            Write-Host "❌ Failed to connect to Microsoft Graph" -ForegroundColor Red
+            Write-Host "Press Enter to exit..." -ForegroundColor Yellow
+            Read-Host
+            return
+        }
+
+        Write-Host "✅ Successfully connected to Microsoft Graph" -ForegroundColor Green
+
+        $currentUser = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/me" -ErrorAction Stop
+        $currentUserId = $currentUser.id
+        Write-Host "✅ Current User ID: $currentUserId" -ForegroundColor Green
+    } catch {
+        Write-Host "❌ Failed to connect to Microsoft Graph: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "Press Enter to continue..." -ForegroundColor Yellow
+        Read-Host
+        return
+    }
+
+    # Start the PIM group management workflow
+    [Console]::CursorVisible = $true
+    Start-GroupsPIMRoleManagement -CurrentUserId $currentUserId
+
+    # Cleanup
+    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+}
+
+# ========================= Entra PIM Workflow =========================
 
 function Start-EntraPIMWorkflow {
     $script:CurrentWorkflow = 'Entra'
@@ -5453,6 +6626,9 @@ do {
         }
         'Azure' {
             Start-AzurePIMWorkflow
+        }
+        'Groups' {
+            Start-GroupsPIMWorkflow
         }
         'Quit' {
             Invoke-GracefulExit -Reason "Exiting..."
