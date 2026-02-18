@@ -605,7 +605,7 @@ function Get-EligibleRolesOptimized {
         
         $sw2 = [System.Diagnostics.Stopwatch]::StartNew()
         try {
-            $activeResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignmentScheduleInstances?`$filter=principalId eq '$CurrentUserId' and assignmentType eq 'Activated'&`$select=roleDefinitionId,endDateTime" -ErrorAction Stop
+            $activeResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignmentScheduleInstances?`$filter=principalId eq '$CurrentUserId'&`$select=roleDefinitionId,endDateTime,assignmentType" -ErrorAction Stop
             $activatedAssignments = if ($activeResponse -and $activeResponse.value) { $activeResponse.value } else { @() }
         } catch { $activatedAssignments = @() }
         $sw2.Stop()
@@ -638,12 +638,14 @@ function Get-EligibleRolesOptimized {
         $sw4.Stop()
         Write-Host " [C:$($sw4.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
         
-        # Process active assignments
+        # Process active and permanently assigned roles
         $activeRoleIds = @()
         if ($activatedAssignments -and $activatedAssignments.Count -gt 0) {
             $currentTime = Get-Date
             $activeRoleIds = $activatedAssignments | Where-Object {
-                $null -ne $_.endDateTime -and [DateTime]::Parse($_.endDateTime, [System.Globalization.CultureInfo]::InvariantCulture).ToLocalTime() -gt $currentTime
+                # Exclude permanent assignments (Assigned) and currently active PIM-activated roles
+                $_.assignmentType -eq 'Assigned' -or
+                ($null -ne $_.endDateTime -and [DateTime]::Parse($_.endDateTime, [System.Globalization.CultureInfo]::InvariantCulture).ToLocalTime() -gt $currentTime)
             } | Select-Object -ExpandProperty roleDefinitionId -Unique
         }
         
@@ -5427,7 +5429,7 @@ function Get-ActiveGroupsOptimized {
 
     $activeGroups = @()
     try {
-        $uri = "https://graph.microsoft.com/v1.0/identityGovernance/privilegedAccess/group/assignmentScheduleInstances?`$filter=principalId eq '$CurrentUserId'&`$expand=group"
+        $uri = "https://graph.microsoft.com/v1.0/identityGovernance/privilegedAccess/group/assignmentScheduleInstances?`$filter=principalId eq '$CurrentUserId' and assignmentType eq 'Activated'&`$expand=group"
         $response = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
         $instances = if ($response -and $response.value) { $response.value } else { @() }
 
