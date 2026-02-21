@@ -3905,8 +3905,7 @@ function Get-AzureEligibleRoles {
             Write-Host "  ⚠️ Could not query subscription '$($sub.Name)'" -ForegroundColor Yellow
         }
         $swSub.Stop()
-        $subLabel = if ($sub.Name.Length -gt 15) { $sub.Name.Substring(0, 12) + "..." } else { $sub.Name }
-        Write-Host " [$subLabel`:$($swSub.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
+        Write-Host " [$($swSub.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
     }
 
     return $allEligibleRoles
@@ -3952,8 +3951,7 @@ function Get-AzureActiveRoles {
             Write-Host "  ⚠️ Could not query subscription '$($sub.Name)'" -ForegroundColor Yellow
         }
         $swSub.Stop()
-        $subLabel = if ($sub.Name.Length -gt 15) { $sub.Name.Substring(0, 12) + "..." } else { $sub.Name }
-        Write-Host " [$subLabel`:$($swSub.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
+        Write-Host " [$($swSub.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
     }
 
     return $allActiveRoles
