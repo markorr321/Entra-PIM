@@ -4694,6 +4694,7 @@ function Show-AzureBrowseAllRolesUI {
 
             if ($availableRoles.Count -gt 0) {
                 Write-Host " ✅ $($availableRoles.Count) available" -ForegroundColor Green
+                Start-Sleep -Milliseconds 800
             } else {
                 Write-Host ""
             }
@@ -4850,6 +4851,7 @@ function Start-AzurePIMRoleManagement {
 
             if ($availableForActivation.Count -gt 0) {
                 Write-Host " ✅ $($availableForActivation.Count) found" -ForegroundColor Green
+                Start-Sleep -Milliseconds 800
             } else {
                 Write-Host ""
                 Write-Host ""
