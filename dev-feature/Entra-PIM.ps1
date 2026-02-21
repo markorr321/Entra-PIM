@@ -3869,7 +3869,10 @@ function Invoke-AzurePIMApi {
 }
 
 function Get-AzureEligibleRoles {
-    param([switch]$Force)
+    param(
+        [switch]$Force,
+        [switch]$Silent
+    )
 
     if (-not $script:AzureSelectedSubscriptions -or $script:AzureSelectedSubscriptions.Count -eq 0) {
         return @()
@@ -3902,10 +3905,14 @@ function Get-AzureEligibleRoles {
                 }
             }
         } catch {
-            Write-Host "  ⚠️ Could not query subscription '$($sub.Name)'" -ForegroundColor Yellow
+            if (-not $Silent) {
+                Write-Host "  ⚠️ Could not query subscription '$($sub.Name)'" -ForegroundColor Yellow
+            }
         }
         $swSub.Stop()
-        Write-Host " [$($swSub.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
+        if (-not $Silent) {
+            Write-Host " [$($swSub.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
+        }
     }
 
     return $allEligibleRoles
@@ -4991,8 +4998,8 @@ function Start-AzureRoleDeactivationWorkflow {
         Write-Host "❌ No active roles available for deactivation." -ForegroundColor Red
         Write-Host ""
 
-        # Check if there are eligible roles to offer activation
-        $eligibleRoles = Get-AzureEligibleRoles
+        # Check if there are eligible roles to offer activation (silent to avoid timing output)
+        $eligibleRoles = Get-AzureEligibleRoles -Silent
         if ($eligibleRoles.Count -gt 0) {
             Write-Host "Would you like to activate roles instead? (Y/N): " -NoNewline -ForegroundColor Cyan
 
@@ -5510,12 +5517,13 @@ function Start-AzureRoleDeactivation {
 
     foreach ($role in $rolesToDeactivate) {
         $roleName = $role.RoleDisplayName
+        $subName = $role.SubscriptionName
         $result = Stop-AzureRoleActivation -ActiveRole $role
         if ($result.Success) {
-            Write-Host "✅ Successfully deactivated: $roleName" -ForegroundColor Green
+            Write-Host "✅ Successfully deactivated: $subName > $roleName" -ForegroundColor Green
             $successCount++
         } else {
-            Write-Host "❌ Failed to deactivate: $roleName - $($result.Error)" -ForegroundColor Red
+            Write-Host "❌ Failed to deactivate: $subName > $roleName - $($result.Error)" -ForegroundColor Red
             $failCount++
         }
     }
@@ -5626,9 +5634,10 @@ function Show-AzureActivationWizard {
 
     foreach ($role in $RolesToActivate) {
         $roleName = $role.RoleDisplayName
+        $subName = $role.SubscriptionName
         $result = Start-AzureRoleActivation -EligibleRole $role -Justification $justification -Duration $duration
         if ($result.Success) {
-            Write-Host "✅ Role activation submitted for: $roleName" -ForegroundColor Green
+            Write-Host "✅ Role activation submitted for: $subName > $roleName" -ForegroundColor Green
             $successCount++
         } elseif ($result.ClaimsChallenge) {
             # Conditional Access requires step-up authentication (ACRS claim)
@@ -5658,22 +5667,22 @@ function Show-AzureActivationWizard {
                     # Retry the activation request
                     $retryResult = Start-AzureRoleActivation -EligibleRole $role -Justification $justification -Duration $duration
                     if ($retryResult.Success) {
-                        Write-Host "✅ Role activation submitted for: $roleName" -ForegroundColor Green
+                        Write-Host "✅ Role activation submitted for: $subName > $roleName" -ForegroundColor Green
                         $successCount++
                     } else {
-                        Write-Host "❌ Failed to activate: $roleName - $($retryResult.Error)" -ForegroundColor Red
+                        Write-Host "❌ Failed to activate: $subName > $roleName - $($retryResult.Error)" -ForegroundColor Red
                         $failCount++
                     }
                 } else {
-                    Write-Host "❌ Failed to activate: $roleName - Step-up authentication failed" -ForegroundColor Red
+                    Write-Host "❌ Failed to activate: $subName > $roleName - Step-up authentication failed" -ForegroundColor Red
                     $failCount++
                 }
             } catch {
-                Write-Host "❌ Failed to activate: $roleName - $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host "❌ Failed to activate: $subName > $roleName - $($_.Exception.Message)" -ForegroundColor Red
                 $failCount++
             }
         } else {
-            Write-Host "❌ Failed to activate: $roleName - $($result.Error)" -ForegroundColor Red
+            Write-Host "❌ Failed to activate: $subName > $roleName - $($result.Error)" -ForegroundColor Red
             $failCount++
         }
     }

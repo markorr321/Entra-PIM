@@ -332,13 +332,12 @@ function Connect-PIMGraph {
     # Compile the C# browser auth helper
     $null = Initialize-MSALHelper
 
+    # Least privileged permissions for PIM group activation
     $scopes = @(
-        "PrivilegedEligibilitySchedule.Read.AzureADGroup",
-        "PrivilegedEligibilitySchedule.ReadWrite.AzureADGroup",
-        "PrivilegedAccess.Read.AzureADGroup",
-        "PrivilegedAccess.ReadWrite.AzureADGroup",
-        "RoleManagementPolicy.Read.AzureADGroup",
-        "User.Read"
+        "PrivilegedEligibilitySchedule.Read.AzureADGroup",      # Read eligible assignments
+        "PrivilegedAssignmentSchedule.ReadWrite.AzureADGroup",  # Activate (self-assign)
+        "RoleManagementPolicy.Read.AzureADGroup",               # Read policy/duration rules
+        "User.Read"                                              # Get current user ID
     )
 
     if ($ClientId) {
