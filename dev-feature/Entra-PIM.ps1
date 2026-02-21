@@ -4124,7 +4124,7 @@ function Start-AzurePIMWorkflow {
         $script:AzureCurrentUserId = $claims.oid
 
         # Connect to Azure using the MSAL token (without SkipValidation to avoid needing subscription)
-        $null = Connect-AzAccount -AccessToken $accessToken -AccountId $accountId -Tenant $tenantId -ErrorAction Stop
+        $null = Connect-AzAccount -AccessToken $accessToken -AccountId $accountId -Tenant $tenantId -ErrorAction Stop -WarningAction SilentlyContinue
 
         $context = Get-AzContext
         if (-not $context) {
@@ -4135,13 +4135,14 @@ function Start-AzurePIMWorkflow {
         Write-Host "✅ Account: $($context.Account.Id)" -ForegroundColor Green
 
         # First, try to get PIM eligible roles directly (works even without subscription access)
-        Write-Host "🔄 Checking for PIM eligible roles..." -ForegroundColor Cyan
-        
+        Write-Host "🔄 Checking for PIM eligible roles..." -ForegroundColor Cyan -NoNewline
+
         # Use the original access token from MSAL (already has management.azure.com scope)
         $headers = @{ Authorization = "Bearer $accessToken" }
-        
+
         # Get eligible role assignments across all scopes the user can see
         $pimEligibleRoles = @()
+        $swEligible = [System.Diagnostics.Stopwatch]::StartNew()
         try {
             # Query at root scope to find all eligible assignments
             $uri = "https://management.azure.com/providers/Microsoft.Authorization/roleEligibilityScheduleInstances?api-version=2020-10-01&`$filter=asTarget()"
@@ -4152,6 +4153,8 @@ function Start-AzurePIMWorkflow {
         } catch {
             # If root scope fails, that's okay - we'll try subscriptions next
         }
+        $swEligible.Stop()
+        Write-Host " [E:$($swEligible.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray
         
         if ($pimEligibleRoles.Count -gt 0) {
             Write-Host "✅ Found $($pimEligibleRoles.Count) PIM eligible role(s)" -ForegroundColor Green
@@ -4206,11 +4209,11 @@ function Start-AzurePIMWorkflow {
             }
         } else {
             # Fallback: Get subscriptions - include tenant ID to ensure we get all
-            $subscriptions = @(Get-AzSubscription -TenantId $tenantId -ErrorAction SilentlyContinue)
-            
+            $subscriptions = @(Get-AzSubscription -TenantId $tenantId -ErrorAction SilentlyContinue -WarningAction SilentlyContinue)
+
             # If still no subscriptions, try without tenant filter
             if ($subscriptions.Count -eq 0) {
-                $subscriptions = @(Get-AzSubscription -ErrorAction SilentlyContinue)
+                $subscriptions = @(Get-AzSubscription -ErrorAction SilentlyContinue -WarningAction SilentlyContinue)
             }
         }
         
@@ -5658,7 +5661,7 @@ function Show-AzureActivationWizard {
                     # Reconnect to Azure with new token
                     Disconnect-AzAccount -ErrorAction SilentlyContinue | Out-Null
                     Clear-AzContext -Force -ErrorAction SilentlyContinue | Out-Null
-                    $null = Connect-AzAccount -AccessToken $newToken -AccountId $accountId -Tenant $tenantId -ErrorAction Stop
+                    $null = Connect-AzAccount -AccessToken $newToken -AccountId $accountId -Tenant $tenantId -ErrorAction Stop -WarningAction SilentlyContinue
                     
                     # Retry the activation request
                     $retryResult = Start-AzureRoleActivation -EligibleRole $role -Justification $justification -Duration $duration
