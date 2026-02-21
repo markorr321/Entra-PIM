@@ -3075,7 +3075,8 @@ function Show-PIMGlobalHeader {
             [switch]$KeepSelectionVisible = $false,
             [string]$DisplayProperty = $null,
             [switch]$ShowBack = $false,
-            [switch]$ShowSubtitle = $false
+            [switch]$ShowSubtitle = $false,
+            [string]$HeaderStyle = "Entra"
         )
         
         if ($Items.Count -eq 0) {
@@ -3103,7 +3104,11 @@ function Show-PIMGlobalHeader {
             # Simple clean approach - just redraw everything each time
             do {
                     Clear-Host
-                Show-PIMGlobalHeaderMinimal
+                switch ($HeaderStyle) {
+                    "Groups" { Show-GroupsPIMHeader }
+                    "Azure"  { Show-AzurePIMHeader }
+                    default  { Show-PIMGlobalHeaderMinimal }
+                }
                 if ($ShowSubtitle) {
                     Write-Host "    with PowerShell" -ForegroundColor DarkGray
                 }
@@ -6313,7 +6318,7 @@ function Start-GroupActivationWorkflow {
     }
 
     # Show checkbox menu for group selection with back option
-    $selectedIndices = Show-CheckboxMenu -Items $groupItems -Title "Select Groups to Activate" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -ShowBack
+    $selectedIndices = Show-CheckboxMenu -Items $groupItems -Title "Select Groups to Activate" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -ShowBack -HeaderStyle "Groups"
 
     if ($selectedIndices -eq "BACK") {
         return
@@ -6687,7 +6692,7 @@ function Start-GroupsPIMRoleManagement {
             "Deactivate Groups"
         )
 
-        $selectedIndices = Show-CheckboxMenu -Items $menuItems -Title "🔄 Choose Action" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -SingleSelection -ShowBack
+        $selectedIndices = Show-CheckboxMenu -Items $menuItems -Title "🔄 Choose Action" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -SingleSelection -ShowBack -HeaderStyle "Groups"
 
         # Back returns to workflow selector
         if ($selectedIndices -eq "BACK") {
