@@ -3878,6 +3878,7 @@ function Get-AzureEligibleRoles {
     $allEligibleRoles = @()
 
     foreach ($sub in $script:AzureSelectedSubscriptions) {
+        $swSub = [System.Diagnostics.Stopwatch]::StartNew()
         Set-AzContext -SubscriptionId $sub.Id -ErrorAction SilentlyContinue | Out-Null
         $path = "/subscriptions/$($sub.Id)/providers/Microsoft.Authorization/roleEligibilityScheduleInstances?api-version=2020-10-01&`$filter=asTarget()"
 
@@ -3903,6 +3904,9 @@ function Get-AzureEligibleRoles {
         } catch {
             Write-Host "  ⚠️ Could not query subscription '$($sub.Name)'" -ForegroundColor Yellow
         }
+        $swSub.Stop()
+        $subLabel = if ($sub.Name.Length -gt 15) { $sub.Name.Substring(0, 12) + "..." } else { $sub.Name }
+        Write-Host " [$subLabel`:$($swSub.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
     }
 
     return $allEligibleRoles
@@ -3918,6 +3922,7 @@ function Get-AzureActiveRoles {
     $allActiveRoles = @()
 
     foreach ($sub in $script:AzureSelectedSubscriptions) {
+        $swSub = [System.Diagnostics.Stopwatch]::StartNew()
         Set-AzContext -SubscriptionId $sub.Id -ErrorAction SilentlyContinue | Out-Null
         $path = "/subscriptions/$($sub.Id)/providers/Microsoft.Authorization/roleAssignmentScheduleInstances?api-version=2020-10-01&`$filter=asTarget()"
 
@@ -3946,6 +3951,9 @@ function Get-AzureActiveRoles {
         } catch {
             Write-Host "  ⚠️ Could not query subscription '$($sub.Name)'" -ForegroundColor Yellow
         }
+        $swSub.Stop()
+        $subLabel = if ($sub.Name.Length -gt 15) { $sub.Name.Substring(0, 12) + "..." } else { $sub.Name }
+        Write-Host " [$subLabel`:$($swSub.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
     }
 
     return $allActiveRoles
@@ -4680,10 +4688,7 @@ function Show-AzureBrowseAllRolesUI {
             Write-Host "🔄 Loading roles across all subscriptions..." -ForegroundColor Cyan -NoNewline
 
             # Get active roles across ALL subscriptions to filter them out
-            $swActive = [System.Diagnostics.Stopwatch]::StartNew()
             $activeRoles = Get-AzureActiveRoles
-            $swActive.Stop()
-            Write-Host " [A:$($swActive.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
 
             # Filter out already active roles
             $activeKeys = $activeRoles | ForEach-Object { "$($_.RoleDefinitionId)|$($_.Scope)" }
@@ -4782,15 +4787,12 @@ function Show-AzureBrowseAllRolesUI {
             Write-Host ""
             Write-Host "🔄 Loading active roles across all subscriptions..." -ForegroundColor Cyan -NoNewline
 
-            $swActive = [System.Diagnostics.Stopwatch]::StartNew()
             $activeRoles = Get-AzureActiveRoles
-            $swActive.Stop()
 
             if ($activeRoles.Count -gt 0) {
-                Write-Host " [A:$($swActive.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
                 Write-Host " ✅ $($activeRoles.Count) found" -ForegroundColor Green
             } else {
-                Write-Host " [A:$($swActive.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray
+                Write-Host ""
             }
 
             Start-AzureRoleDeactivationWorkflow -ActiveRoles $activeRoles
@@ -4832,15 +4834,8 @@ function Start-AzurePIMRoleManagement {
             Write-Host ""
             Write-Host "🔄 Loading eligible roles..." -ForegroundColor Cyan -NoNewline
 
-            $swEligible = [System.Diagnostics.Stopwatch]::StartNew()
             $eligibleRoles = Get-AzureEligibleRoles
-            $swEligible.Stop()
-            Write-Host " [E:$($swEligible.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
-
-            $swActive = [System.Diagnostics.Stopwatch]::StartNew()
             $activeRoles = Get-AzureActiveRoles
-            $swActive.Stop()
-            Write-Host " [A:$($swActive.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
 
             # Filter out already active roles from eligible
             $activeKeys = $activeRoles | ForEach-Object { "$($_.RoleDefinitionId)|$($_.Scope)" }
@@ -4866,15 +4861,12 @@ function Start-AzurePIMRoleManagement {
             Write-Host ""
             Write-Host "🔄 Loading active roles..." -ForegroundColor Cyan -NoNewline
 
-            $swActive = [System.Diagnostics.Stopwatch]::StartNew()
             $activeRoles = Get-AzureActiveRoles
-            $swActive.Stop()
 
             if ($activeRoles.Count -gt 0) {
-                Write-Host " [A:$($swActive.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
                 Write-Host " ✅ $($activeRoles.Count) found" -ForegroundColor Green
             } else {
-                Write-Host " [A:$($swActive.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray
+                Write-Host ""
             }
 
             Start-AzureRoleDeactivationWorkflow -ActiveRoles $activeRoles
