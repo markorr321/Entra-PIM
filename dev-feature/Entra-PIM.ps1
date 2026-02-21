@@ -678,7 +678,7 @@ function Get-EligibleRolesOptimized {
 function Show-HelpMenu {
     [Console]::CursorVisible = $false
     Clear-Host
-    Write-Host "[ E N T R A   P I M ]" -ForegroundColor Cyan
+    Write-Host "[ E N T R A   P I M ]" -ForegroundColor Magenta
     Write-Host ""
     Write-Host "📖 Help Menu" -ForegroundColor Cyan
     Write-Host ""
@@ -721,7 +721,6 @@ function Show-DynamicExpirationMenu {
             Show-PIMGlobalHeaderMinimal
             Write-Host ""
             Write-Host $Title -ForegroundColor Cyan
-            Write-Host ("=" * $Title.Length) -ForegroundColor Cyan
             Write-Host ""
             
             # Filter out expired roles and check if any remain
@@ -1575,12 +1574,12 @@ function Start-RoleDeactivationWorkflowWithCheck {
 }
 
 function Show-PIMGlobalHeader {
-        Write-Host "[ E N T R A   P I M ]" -ForegroundColor Cyan
+        Write-Host "[ E N T R A   P I M ]" -ForegroundColor Magenta
         Write-Host "    with PowerShell" -ForegroundColor DarkGray
     }
     
     function Show-PIMGlobalHeaderMinimal {
-        Write-Host "[ E N T R A   P I M ]" -ForegroundColor Cyan
+        Write-Host "[ E N T R A   P I M ]" -ForegroundColor Magenta
     }
     
     # ========================= Centralized Control Menu System =========================
@@ -2418,7 +2417,7 @@ function Show-PIMGlobalHeader {
          
          # Clear screen and show header
         Clear-Host
-        Write-Host "[ E N T R A   P I M ]" -ForegroundColor DarkMagenta
+        Write-Host "[ E N T R A   P I M ]" -ForegroundColor Magenta
         Write-Host "PIM-Global Self-Activate - Automate Self-Activating PIM Roles via Microsoft Entra ID" -ForegroundColor Green
         
         # Initialize selection state
@@ -2512,7 +2511,7 @@ function Show-PIMGlobalHeader {
                 if (($currentTime - $lastUpdate).TotalSeconds -ge 1) {
                     # Always redraw header at top to ensure it's visible
                     [Console]::SetCursorPosition(0, 0)
-                    Write-Host "[ E N T R A   P I M ]" -ForegroundColor DarkMagenta
+                    Write-Host "[ E N T R A   P I M ]" -ForegroundColor Magenta
                     [Console]::SetCursorPosition(0, 1)
                     Write-Host ""  # Space between PIM-Global and Countdown
                     [Console]::SetCursorPosition(0, 2)
@@ -3031,7 +3030,6 @@ function Show-PIMGlobalHeader {
                 Show-PIMGlobalHeader
                     Write-Host ""
                 Write-Host $Title -ForegroundColor Cyan
-                Write-Host $("=" * $Title.Length) -ForegroundColor Cyan
                 Write-Host ""
                 
                 # Display menu items
@@ -3076,7 +3074,8 @@ function Show-PIMGlobalHeader {
             [switch]$PreserveContent = $false,
             [switch]$KeepSelectionVisible = $false,
             [string]$DisplayProperty = $null,
-            [switch]$ShowBack = $false
+            [switch]$ShowBack = $false,
+            [switch]$ShowSubtitle = $false
         )
         
         if ($Items.Count -eq 0) {
@@ -3105,9 +3104,11 @@ function Show-PIMGlobalHeader {
             do {
                     Clear-Host
                 Show-PIMGlobalHeaderMinimal
+                if ($ShowSubtitle) {
+                    Write-Host "    with PowerShell" -ForegroundColor DarkGray
+                }
                     Write-Host ""
                 Write-Host $Title -ForegroundColor Cyan
-                Write-Host $("=" * $Title.Length) -ForegroundColor Cyan
                 Write-Host ""
                 
                 # Show all roles
@@ -3807,7 +3808,7 @@ function Show-WorkflowSelector {
         "Azure Resource Roles"
     )
 
-    $selectedIndices = Show-CheckboxMenu -Items $menuItems -Title "🔄 Select Workflow" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -SingleSelection
+    $selectedIndices = Show-CheckboxMenu -Items $menuItems -Title "🔄 Select Workflow" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -SingleSelection -ShowSubtitle
 
     if ($null -eq $selectedIndices -or $selectedIndices.Count -eq 0) {
         return 'Quit'
@@ -4051,7 +4052,7 @@ function Start-AzurePIMWorkflow {
     # Load Az modules with progress bar
     Clear-Host
     Write-Host ""
-    Write-Host "[ A Z U R E   P I M ]" -ForegroundColor Cyan
+    Write-Host "[ A Z U R E   P I M ]" -ForegroundColor Magenta
     Write-Host "    with PowerShell" -ForegroundColor DarkGray
     Write-Host ""
 
@@ -4325,7 +4326,7 @@ function Start-AzurePIMWorkflow {
 }
 
 function Show-AzurePIMHeader {
-    Write-Host "[ A Z U R E   P I M ]" -ForegroundColor Cyan
+    Write-Host "[ A Z U R E   P I M ]" -ForegroundColor Magenta
 }
 
 function Invoke-AzurePIMExit {
@@ -4379,7 +4380,6 @@ function Show-AzureCheckboxMenu {
             Show-AzurePIMHeader
             Write-Host ""
             Write-Host $Title -ForegroundColor Cyan
-            Write-Host $("=" * $Title.Length) -ForegroundColor Cyan
             Write-Host ""
 
             for ($i = 0; $i -lt $Items.Count; $i++) {
@@ -4535,7 +4535,7 @@ function Show-AzureGroupedCheckboxMenu {
             Show-AzurePIMHeader
             Write-Host ""
             Write-Host $Title -ForegroundColor Cyan
-            Write-Host $("=" * $Title.Length) -ForegroundColor Cyan
+            Write-Host ""
 
             for ($i = 0; $i -lt $GroupedItems.Count; $i++) {
                 $item = $GroupedItems[$i]
@@ -5243,7 +5243,6 @@ function Show-AzureDynamicExpirationMenu {
             Show-AzurePIMHeader
             Write-Host ""
             Write-Host $Title -ForegroundColor Cyan
-            Write-Host ("=" * $Title.Length) -ForegroundColor Cyan
             Write-Host ""
 
             # Filter out expired roles and check if any remain
@@ -5733,7 +5732,7 @@ function Show-AzureActivationWizard {
 # ========================= Groups PIM Functions =========================
 
 function Show-GroupsPIMHeader {
-    Write-Host "[ P I M   G R O U P S ]" -ForegroundColor Cyan
+    Write-Host "[ P I M   G R O U P S ]" -ForegroundColor Magenta
 }
 
 function Invoke-GroupsPIMExit {
@@ -6050,7 +6049,6 @@ function Show-GroupsDynamicExpirationMenu {
             Show-GroupsPIMHeader
             Write-Host ""
             Write-Host $Title -ForegroundColor Cyan
-            Write-Host ("=" * $Title.Length) -ForegroundColor Cyan
             Write-Host ""
 
             # Filter out expired groups and check if any remain
@@ -6755,7 +6753,7 @@ function Start-GroupsPIMWorkflow {
 
     Clear-Host
     Write-Host ""
-    Write-Host "[ P I M   G R O U P S ]" -ForegroundColor Cyan
+    Write-Host "[ P I M   G R O U P S ]" -ForegroundColor Magenta
     Write-Host "    with PowerShell" -ForegroundColor DarkGray
     Write-Host ""
 
