@@ -4173,6 +4173,31 @@ function Start-AzurePIMWorkflow {
                     Id = $subId
                 }
             }
+
+            # Build normalized role objects from root-scope data (reuse for Browse All Roles)
+            $allNormalizedRoles = @()
+            foreach ($role in $pimEligibleRoles) {
+                $subId = $null
+                $subName = "Unknown"
+                if ($role.properties.scope -match '/subscriptions/([^/]+)') {
+                    $subId = $matches[1]
+                }
+                $matchingSub = $subscriptions | Where-Object { $_.Id -eq $subId } | Select-Object -First 1
+                if ($matchingSub) { $subName = $matchingSub.Name }
+
+                $allNormalizedRoles += [PSCustomObject]@{
+                    Id               = $role.id
+                    Name             = $role.name
+                    RoleDefinitionId = $role.properties.roleDefinitionId
+                    RoleDisplayName  = $role.properties.expandedProperties.roleDefinition.displayName
+                    Scope            = $role.properties.scope
+                    ScopeDisplayName = $role.properties.expandedProperties.scope.displayName
+                    ScopeType        = $role.properties.expandedProperties.scope.type
+                    PrincipalId      = $role.properties.principalId
+                    SubscriptionId   = $subId
+                    SubscriptionName = $subName
+                }
+            }
         } else {
             # Fallback: Get subscriptions - include tenant ID to ensure we get all
             $subscriptions = @(Get-AzSubscription -TenantId $tenantId -ErrorAction SilentlyContinue)
@@ -4212,31 +4237,91 @@ function Start-AzurePIMWorkflow {
         $script:AzureCurrentUserId = (Get-AzContext).Account.Id
     }
 
-    # Subscription selection + role management loop
-    # Back from action menu returns here to re-pick subscription
-    do {
-        $selectedSubIndices = Show-CheckboxMenu -Items $subItems -Title "📦 Select Subscription" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -DisplayProperty "Name" -SingleSelection -ShowBack
+    # Show view-mode menu when we have normalized role data from root-scope API
+    if ($allNormalizedRoles.Count -gt 0) {
+        do {
+            $viewModeItems = @(
+                "Browse All Roles",
+                "Filter by Subscription"
+            )
 
-        # Back returns to workflow selector
-        if ($selectedSubIndices -eq "BACK") {
-            return
-        }
+            $viewModeSelection = Show-AzureCheckboxMenu -Items $viewModeItems -Title "📦 How would you like to find roles?" -Prompt "Use arrow keys to navigate, SPACE to select, ENTER to confirm:" -SingleSelection -ShowBack
 
-        if ($selectedSubIndices.Count -eq 0) {
-            return
-        }
+            if ($viewModeSelection -eq "BACK") {
+                return
+            }
 
-        $selectedSub = $subscriptions[$selectedSubIndices[0]]
-        $script:AzureSelectedSubscriptions = @([PSCustomObject]@{
-            Id   = $selectedSub.Id
-            Name = $selectedSub.Name
-        })
+            if ($null -eq $viewModeSelection -or $viewModeSelection.Count -eq 0) {
+                return
+            }
 
-        Set-AzContext -SubscriptionId $selectedSub.Id -ErrorAction SilentlyContinue | Out-Null
+            $viewMode = $viewModeSelection[0]
 
-        Start-AzurePIMRoleManagement
-        # When Start-AzurePIMRoleManagement returns (via BACK), loop back to subscription selection
-    } while ($true)
+            if ($viewMode -eq 0) {
+                # Browse All Roles path
+                Show-AzureBrowseAllRolesUI -AllRoles $allNormalizedRoles -Subscriptions $subscriptions
+                # When Browse All returns (via BACK), loop back to view-mode menu
+            } else {
+                # Filter by Subscription path
+                if ($subscriptions.Count -eq 1) {
+                    # Auto-select the only subscription
+                    $selectedSub = $subscriptions[0]
+                    $script:AzureSelectedSubscriptions = @([PSCustomObject]@{
+                        Id   = $selectedSub.Id
+                        Name = $selectedSub.Name
+                    })
+                    Set-AzContext -SubscriptionId $selectedSub.Id -ErrorAction SilentlyContinue | Out-Null
+                    Start-AzurePIMRoleManagement
+                    # When role management returns (via BACK), loop back to view-mode menu
+                } else {
+                    do {
+                        $selectedSubIndices = Show-AzureCheckboxMenu -Items ($subItems | ForEach-Object { $_.Name }) -Title "📦 Select Subscription" -Prompt "Use arrow keys to navigate, SPACE to select, ENTER to confirm:" -SingleSelection -ShowBack
+
+                        if ($selectedSubIndices -eq "BACK") {
+                            break  # Back to view-mode menu
+                        }
+
+                        if ($null -eq $selectedSubIndices -or $selectedSubIndices.Count -eq 0) {
+                            break
+                        }
+
+                        $selectedSub = $subscriptions[$selectedSubIndices[0]]
+                        $script:AzureSelectedSubscriptions = @([PSCustomObject]@{
+                            Id   = $selectedSub.Id
+                            Name = $selectedSub.Name
+                        })
+
+                        Set-AzContext -SubscriptionId $selectedSub.Id -ErrorAction SilentlyContinue | Out-Null
+
+                        Start-AzurePIMRoleManagement
+                    } while ($true)
+                }
+            }
+        } while ($true)
+    } else {
+        # Fallback path (no PIM role data from root scope) - go directly to subscription selection
+        do {
+            $selectedSubIndices = Show-AzureCheckboxMenu -Items ($subItems | ForEach-Object { $_.Name }) -Title "📦 Select Subscription" -Prompt "Use arrow keys to navigate, SPACE to select, ENTER to confirm:" -SingleSelection -ShowBack
+
+            if ($selectedSubIndices -eq "BACK") {
+                return
+            }
+
+            if ($null -eq $selectedSubIndices -or $selectedSubIndices.Count -eq 0) {
+                return
+            }
+
+            $selectedSub = $subscriptions[$selectedSubIndices[0]]
+            $script:AzureSelectedSubscriptions = @([PSCustomObject]@{
+                Id   = $selectedSub.Id
+                Name = $selectedSub.Name
+            })
+
+            Set-AzContext -SubscriptionId $selectedSub.Id -ErrorAction SilentlyContinue | Out-Null
+
+            Start-AzurePIMRoleManagement
+        } while ($true)
+    }
 }
 
 function Show-AzurePIMHeader {
@@ -4399,6 +4484,303 @@ function Show-AzureCheckboxMenu {
     } finally {
         [Console]::CursorVisible = $true
     }
+}
+
+function Show-AzureGroupedCheckboxMenu {
+    param(
+        [Parameter(Mandatory)]
+        [array]$GroupedItems,
+        [string]$Title = "Select Items",
+        [string]$Prompt = "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:",
+        [switch]$ShowBack = $false
+    )
+
+    if ($GroupedItems.Count -eq 0) {
+        Write-Host "No items to select from." -ForegroundColor Red
+        return @()
+    }
+
+    # Build list of selectable indices (skip headers)
+    $selectableIndices = @()
+    for ($i = 0; $i -lt $GroupedItems.Count; $i++) {
+        if ($GroupedItems[$i].Type -eq 'Role') {
+            $selectableIndices += $i
+        }
+    }
+
+    if ($selectableIndices.Count -eq 0) {
+        Write-Host "No selectable items." -ForegroundColor Red
+        return @()
+    }
+
+    # Track selection state by role Index property
+    $selected = @{}
+    foreach ($idx in $selectableIndices) {
+        $selected[$GroupedItems[$idx].Index] = $false
+    }
+
+    # Add back item position
+    $backPosition = $GroupedItems.Count
+    $allPositions = $selectableIndices + @($backPosition)
+
+    # Current position in allPositions array
+    $currentPosIdx = 0
+    $currentIndex = $allPositions[$currentPosIdx]
+
+    [Console]::CursorVisible = $false
+
+    try {
+        do {
+            Clear-Host
+            Show-AzurePIMHeader
+            Write-Host ""
+            Write-Host $Title -ForegroundColor Cyan
+            Write-Host $("=" * $Title.Length) -ForegroundColor Cyan
+
+            for ($i = 0; $i -lt $GroupedItems.Count; $i++) {
+                $item = $GroupedItems[$i]
+                if ($item.Type -eq 'Header') {
+                    Write-Host ""
+                    Write-Host "  📦 $($item.Text)" -ForegroundColor DarkCyan
+                    $headerLen = $item.Text.Length + 4
+                    Write-Host "  $('─' * $headerLen)" -ForegroundColor DarkGray
+                } else {
+                    $roleIdx = $item.Index
+                    $checkbox = if ($selected[$roleIdx]) { "[✓]" } else { "[ ]" }
+                    $arrow = if ($i -eq $currentIndex) { "► " } else { "  " }
+                    $line = "$arrow$checkbox $($item.Text)"
+
+                    if ($selected[$roleIdx]) {
+                        Write-Host $line -ForegroundColor Green
+                    } elseif ($i -eq $currentIndex) {
+                        Write-Host $line -ForegroundColor Yellow
+                    } else {
+                        Write-Host $line -ForegroundColor White
+                    }
+                }
+            }
+
+            # Show Back item
+            if ($ShowBack) {
+                Write-Host ""
+                $backArrow = if ($currentIndex -eq $backPosition) { "► " } else { "  " }
+                $backColor = if ($currentIndex -eq $backPosition) { "Yellow" } else { "Gray" }
+                Write-Host "$backArrow← Back" -ForegroundColor $backColor
+            }
+
+            Write-Host ""
+            $selectedCount = ($selected.GetEnumerator() | Where-Object { $_.Value }).Count
+            Write-Host "Roles Selected: $selectedCount" -ForegroundColor Cyan
+            Write-Host ""
+            Write-Host "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | $(Get-HelpShortcutText) | $(Get-QuitShortcutText)" -ForegroundColor Magenta
+
+            $key = [Console]::ReadKey($true)
+
+            if (Test-QuitShortcut -Key $key) {
+                Invoke-AzurePIMExit
+            }
+
+            # Ctrl+A to select/deselect all
+            if ($key.Modifiers -band [ConsoleModifiers]::Control -and $key.Key -eq 'A') {
+                $allSelected = ($selected.Values | Where-Object { $_ }).Count -eq $selectableIndices.Count
+                foreach ($idx in $selectableIndices) {
+                    $selected[$GroupedItems[$idx].Index] = -not $allSelected
+                }
+                continue
+            }
+
+            if (Test-HelpShortcut -Key $key) {
+                Show-HelpMenu
+                continue
+            }
+
+            switch ($key.Key) {
+                "UpArrow" {
+                    $currentPosIdx = if ($currentPosIdx -gt 0) { $currentPosIdx - 1 } else { $allPositions.Count - 1 }
+                    $currentIndex = $allPositions[$currentPosIdx]
+                }
+                "DownArrow" {
+                    $currentPosIdx = if ($currentPosIdx -lt ($allPositions.Count - 1)) { $currentPosIdx + 1 } else { 0 }
+                    $currentIndex = $allPositions[$currentPosIdx]
+                }
+                "Spacebar" {
+                    if ($ShowBack -and $currentIndex -eq $backPosition) {
+                        [Console]::CursorVisible = $true
+                        return "BACK"
+                    }
+                    if ($currentIndex -lt $GroupedItems.Count) {
+                        $roleIdx = $GroupedItems[$currentIndex].Index
+                        $selected[$roleIdx] = -not $selected[$roleIdx]
+                    }
+                }
+                "Enter" {
+                    if ($ShowBack -and $currentIndex -eq $backPosition) {
+                        [Console]::CursorVisible = $true
+                        return "BACK"
+                    }
+                    $selectedItems = @()
+                    foreach ($entry in $selected.GetEnumerator()) {
+                        if ($entry.Value) {
+                            $selectedItems += $entry.Key
+                        }
+                    }
+                    [Console]::CursorVisible = $true
+                    return $selectedItems
+                }
+                "Escape" {
+                    [Console]::CursorVisible = $true
+                    if ($ShowBack) { return "BACK" }
+                    return @()
+                }
+            }
+
+        } while ($true)
+    } finally {
+        [Console]::CursorVisible = $true
+    }
+}
+
+function Show-AzureBrowseAllRolesUI {
+    param(
+        [array]$AllRoles,
+        [array]$Subscriptions
+    )
+
+    do {
+        # Set AzureSelectedSubscriptions to ALL subscriptions for API queries
+        $script:AzureSelectedSubscriptions = $Subscriptions | ForEach-Object {
+            [PSCustomObject]@{ Id = $_.Id; Name = $_.Name }
+        }
+
+        # Show Activate/Deactivate action menu
+        $menuItems = @(
+            "Activate Roles",
+            "Deactivate Roles"
+        )
+
+        $selectedIndices = Show-AzureCheckboxMenu -Items $menuItems -Title "🔄 Choose Action" -Prompt "Use arrow keys to navigate, SPACE to select, ENTER to confirm:" -SingleSelection -ShowBack
+
+        if ($selectedIndices -eq "BACK") { return }
+        if ($null -eq $selectedIndices -or $selectedIndices.Count -eq 0) { return }
+
+        $selectedAction = $menuItems[$selectedIndices[0]]
+
+        if ($selectedAction -eq "Activate Roles") {
+            Clear-Host
+            Show-AzurePIMHeader
+            Write-Host ""
+            Write-Host "🔄 Loading roles across all subscriptions..." -ForegroundColor Cyan -NoNewline
+
+            # Get active roles across ALL subscriptions to filter them out
+            $activeRoles = Get-AzureActiveRoles
+
+            # Filter out already active roles
+            $activeKeys = $activeRoles | ForEach-Object { "$($_.RoleDefinitionId)|$($_.Scope)" }
+            $availableRoles = @($AllRoles | Where-Object {
+                $key = "$($_.RoleDefinitionId)|$($_.Scope)"
+                $activeKeys -notcontains $key
+            })
+
+            if ($availableRoles.Count -gt 0) {
+                Write-Host " ✅ $($availableRoles.Count) available" -ForegroundColor Green
+            } else {
+                Write-Host ""
+            }
+
+            if ($availableRoles.Count -eq 0) {
+                Write-Host ""
+                Write-Host "❌ No eligible roles available for activation." -ForegroundColor Red
+                Write-Host ""
+
+                if ($activeRoles.Count -gt 0) {
+                    Write-Host "Would you like to deactivate roles instead? (Y/N): " -NoNewline -ForegroundColor Cyan
+                    [Console]::CursorVisible = $true
+
+                    $promptLeft = [Console]::CursorLeft
+                    $promptTop = [Console]::CursorTop
+
+                    Write-Host "`n"
+                    Write-Host "Y/N to choose | $(Get-QuitShortcutText)" -ForegroundColor Magenta
+                    [Console]::SetCursorPosition($promptLeft, $promptTop)
+
+                    $userInput = ""
+                    do {
+                        $key = [Console]::ReadKey($true)
+                        if (Test-QuitShortcut -Key $key) { Invoke-AzurePIMExit; return }
+                        if ($key.Key -eq 'Enter') {
+                            if ($userInput -eq 'Y') {
+                                Start-AzureRoleDeactivationWorkflow -ActiveRoles $activeRoles
+                                break
+                            } elseif ($userInput -eq 'N') {
+                                break
+                            } else {
+                                Write-Host ""
+                                Write-Host "Please enter Y or N: " -NoNewline -ForegroundColor Yellow
+                                $userInput = ""
+                            }
+                        } elseif ($key.Key -eq 'Backspace' -and $userInput.Length -gt 0) {
+                            $userInput = $userInput.Substring(0, $userInput.Length - 1)
+                            Write-Host "`b `b" -NoNewline
+                        } elseif ($key.KeyChar -match '[YyNn]' -and $userInput.Length -eq 0) {
+                            $userInput = $key.KeyChar.ToString().ToUpper()
+                            Write-Host $userInput -NoNewline -ForegroundColor Green
+                        }
+                    } while ($true)
+                } else {
+                    Write-Host "Check back later when roles are approved." -ForegroundColor Gray
+                    Write-Host ""
+                    Write-Host "Press any key to continue..." -ForegroundColor Yellow
+                    [Console]::ReadKey($true) | Out-Null
+                }
+                continue
+            }
+
+            # Build flat role list for display
+            $roleItems = @()
+            $sortedRoles = $availableRoles | Sort-Object SubscriptionName, RoleDisplayName
+
+            foreach ($role in $sortedRoles) {
+                $friendlyScope = $role.ScopeDisplayName
+                if ($role.Scope -match '/resourceGroups/([^/]+)') {
+                    $friendlyScope = "RG: $($matches[1])"
+                } elseif ($role.ScopeType -eq 'Subscription' -or $role.Scope -match '/subscriptions/[^/]+$') {
+                    $friendlyScope = "Subscription"
+                }
+                $roleItems += "$($role.SubscriptionName) - $($role.RoleDisplayName) - $friendlyScope"
+            }
+
+            # Show flat role selection
+            $selectedRoleIndices = Show-AzureCheckboxMenu -Items $roleItems -Title "Select Roles to Activate" -ShowBack
+
+            if ($selectedRoleIndices -eq "BACK") { continue }
+            if ($null -eq $selectedRoleIndices -or $selectedRoleIndices.Count -eq 0) { continue }
+
+            # Map indices to actual role objects
+            $rolesToActivate = @()
+            foreach ($idx in $selectedRoleIndices) {
+                $rolesToActivate += $sortedRoles[$idx]
+            }
+
+            # Run the activation wizard
+            Show-AzureActivationWizard -RolesToActivate $rolesToActivate
+
+        } elseif ($selectedAction -eq "Deactivate Roles") {
+            Clear-Host
+            Show-AzurePIMHeader
+            Write-Host ""
+            Write-Host "🔄 Loading active roles across all subscriptions..." -ForegroundColor Cyan -NoNewline
+
+            $activeRoles = Get-AzureActiveRoles
+
+            if ($activeRoles.Count -gt 0) {
+                Write-Host " ✅ $($activeRoles.Count) found" -ForegroundColor Green
+            } else {
+                Write-Host ""
+            }
+
+            Start-AzureRoleDeactivationWorkflow -ActiveRoles $activeRoles
+        }
+    } while ($true)
 }
 
 function Start-AzurePIMRoleManagement {
@@ -5282,12 +5664,8 @@ function Show-AzureActivationWizard {
     }
 
     Write-Host ""
-    if ($successCount -gt 0 -and $failCount -eq 0) {
-        # No summary needed - individual messages are sufficient
-    } elseif ($successCount -gt 0 -and $failCount -gt 0) {
+    if ($successCount -gt 0 -and $failCount -gt 0) {
         Write-Host "⚠️ Activated $successCount role(s), $failCount failed" -ForegroundColor Yellow
-    } elseif ($failCount -gt 0 -and $successCount -eq 0) {
-        Write-Host "❌ Failed to activate $failCount role(s)" -ForegroundColor Red
     }
 
     Write-Host ""
@@ -6068,22 +6446,18 @@ function Start-GroupActivationWorkflow {
     if ($continueChoice -eq "Yes") {
         return
     } else {
-        Write-Host "No additional groups will be managed." -ForegroundColor Red
+        Write-Host "❌ No group management workflows available." -ForegroundColor Yellow
         Write-Host ""
-        Write-Host "Please close the terminal." -ForegroundColor Yellow
+        Write-Host "Check back later when groups are approved or activated." -ForegroundColor Gray
         Write-Host ""
         Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
 
         [Console]::CursorVisible = $false
         do {
-            if ([Console]::KeyAvailable) {
-                $key = [Console]::ReadKey($true)
-                if (Test-QuitShortcut -Key $key) {
-                    Invoke-GroupsPIMExit
-                    return
-                }
+            $key = [Console]::ReadKey($true)
+            if (Test-QuitShortcut -Key $key) {
+                Invoke-GroupsPIMExit
             }
-            Start-Sleep -Milliseconds 100
         } while ($true)
     }
 }
@@ -6117,12 +6491,26 @@ function Start-GroupDeactivationWorkflow {
                     Write-Host ""
                     Write-Host ""
                     Write-Host "❌ No eligible groups available for activation." -ForegroundColor Red
-                    Write-Host ""
-                    Write-Host "Press Enter to exit..." -ForegroundColor Yellow
-                    Read-Host
                 }
+                return
             }
         }
+
+        # User hit N or gave no response — no workflows available
+        Write-Host ""
+        Write-Host "❌ No group management workflows available." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Check back later when groups are approved or activated." -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
+
+        [Console]::CursorVisible = $false
+        do {
+            $key = [Console]::ReadKey($true)
+            if (Test-QuitShortcut -Key $key) {
+                Invoke-GroupsPIMExit
+            }
+        } while ($true)
         return
     }
 
@@ -6254,22 +6642,18 @@ function Start-GroupDeactivationWorkflow {
     if ($continueChoice -eq "Yes") {
         return
     } else {
-        Write-Host "No additional groups will be managed." -ForegroundColor Red
+        Write-Host "❌ No group management workflows available." -ForegroundColor Yellow
         Write-Host ""
-        Write-Host "Please close the terminal." -ForegroundColor Yellow
+        Write-Host "Check back later when groups are approved or activated." -ForegroundColor Gray
         Write-Host ""
         Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
 
         [Console]::CursorVisible = $false
         do {
-            if ([Console]::KeyAvailable) {
-                $key = [Console]::ReadKey($true)
-                if (Test-QuitShortcut -Key $key) {
-                    Invoke-GroupsPIMExit
-                    return
-                }
+            $key = [Console]::ReadKey($true)
+            if (Test-QuitShortcut -Key $key) {
+                Invoke-GroupsPIMExit
             }
-            Start-Sleep -Milliseconds 100
         } while ($true)
     }
 }
