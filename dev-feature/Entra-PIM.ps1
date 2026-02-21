@@ -4672,7 +4672,10 @@ function Show-AzureBrowseAllRolesUI {
             Write-Host "🔄 Loading roles across all subscriptions..." -ForegroundColor Cyan -NoNewline
 
             # Get active roles across ALL subscriptions to filter them out
+            $swActive = [System.Diagnostics.Stopwatch]::StartNew()
             $activeRoles = Get-AzureActiveRoles
+            $swActive.Stop()
+            Write-Host " [A:$($swActive.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
 
             # Filter out already active roles
             $activeKeys = $activeRoles | ForEach-Object { "$($_.RoleDefinitionId)|$($_.Scope)" }
@@ -4737,7 +4740,7 @@ function Show-AzureBrowseAllRolesUI {
 
             # Build flat role list for display
             $roleItems = @()
-            $sortedRoles = $availableRoles | Sort-Object SubscriptionName, RoleDisplayName
+            $sortedRoles = $availableRoles | Sort-Object RoleDisplayName, SubscriptionName
 
             foreach ($role in $sortedRoles) {
                 $friendlyScope = $role.ScopeDisplayName
@@ -4746,7 +4749,7 @@ function Show-AzureBrowseAllRolesUI {
                 } elseif ($role.ScopeType -eq 'Subscription' -or $role.Scope -match '/subscriptions/[^/]+$') {
                     $friendlyScope = "Subscription"
                 }
-                $roleItems += "$($role.SubscriptionName) - $($role.RoleDisplayName) - $friendlyScope"
+                $roleItems += "$($role.RoleDisplayName) > $($role.SubscriptionName) > $friendlyScope"
             }
 
             # Show flat role selection
@@ -4770,12 +4773,15 @@ function Show-AzureBrowseAllRolesUI {
             Write-Host ""
             Write-Host "🔄 Loading active roles across all subscriptions..." -ForegroundColor Cyan -NoNewline
 
+            $swActive = [System.Diagnostics.Stopwatch]::StartNew()
             $activeRoles = Get-AzureActiveRoles
+            $swActive.Stop()
 
             if ($activeRoles.Count -gt 0) {
+                Write-Host " [A:$($swActive.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
                 Write-Host " ✅ $($activeRoles.Count) found" -ForegroundColor Green
             } else {
-                Write-Host ""
+                Write-Host " [A:$($swActive.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray
             }
 
             Start-AzureRoleDeactivationWorkflow -ActiveRoles $activeRoles
@@ -4817,8 +4823,15 @@ function Start-AzurePIMRoleManagement {
             Write-Host ""
             Write-Host "🔄 Loading eligible roles..." -ForegroundColor Cyan -NoNewline
 
+            $swEligible = [System.Diagnostics.Stopwatch]::StartNew()
             $eligibleRoles = Get-AzureEligibleRoles
+            $swEligible.Stop()
+            Write-Host " [E:$($swEligible.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
+
+            $swActive = [System.Diagnostics.Stopwatch]::StartNew()
             $activeRoles = Get-AzureActiveRoles
+            $swActive.Stop()
+            Write-Host " [A:$($swActive.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
 
             # Filter out already active roles from eligible
             $activeKeys = $activeRoles | ForEach-Object { "$($_.RoleDefinitionId)|$($_.Scope)" }
@@ -4843,12 +4856,15 @@ function Start-AzurePIMRoleManagement {
             Write-Host ""
             Write-Host "🔄 Loading active roles..." -ForegroundColor Cyan -NoNewline
 
+            $swActive = [System.Diagnostics.Stopwatch]::StartNew()
             $activeRoles = Get-AzureActiveRoles
+            $swActive.Stop()
 
             if ($activeRoles.Count -gt 0) {
+                Write-Host " [A:$($swActive.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
                 Write-Host " ✅ $($activeRoles.Count) found" -ForegroundColor Green
             } else {
-                Write-Host ""
+                Write-Host " [A:$($swActive.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray
             }
 
             Start-AzureRoleDeactivationWorkflow -ActiveRoles $activeRoles
@@ -5085,7 +5101,7 @@ function Show-AzureRoleActivationUI {
         } elseif ($role.ScopeDisplayName -match '/subscriptions/[^/]+$') {
             $friendlyScope = "Subscription"
         }
-        $roleItems += "$($role.RoleDisplayName) - $friendlyScope"
+        $roleItems += "$($role.RoleDisplayName) > $friendlyScope"
     }
 
     # Show role selection using Azure checkbox menu with back option
@@ -5461,7 +5477,7 @@ function Start-AzureRoleDeactivation {
         }
 
         $roleExpirationData += [PSCustomObject]@{
-            DisplayName = "$($role.RoleDisplayName) - $friendlyScope"
+            DisplayName = "$($role.RoleDisplayName) > $friendlyScope"
             ExpirationTime = $expirationTime
         }
     }
