@@ -1,16 +1,17 @@
 # Entra-PIM
 
-PowerShell module for managing Microsoft Entra PIM (Privileged Identity Management) role activations and deactivations. Supports both **Entra ID roles** and **Azure Resource roles** with browser-based authentication.
+PowerShell module for managing Microsoft Entra PIM (Privileged Identity Management) role activations and deactivations. Supports **Entra ID roles**, **Azure Resource roles**, and **Groups PIM** with browser-based authentication.
 
 ## Features
 
-- **Dual PIM Support**: Manage both Entra ID roles and Azure Resource roles from one tool
+- **Full PIM Support**: Manage Entra ID roles, Azure Resource roles, and Groups PIM from one tool
 - **Cross-Platform**: Works on Windows and macOS
 - **Browser Authentication**: Secure authentication with ForceLogin prompt
 - **Persistent Configuration**: Save custom app registration settings via environment variables
 - **Step-up MFA**: Automatic handling of MFA/claims challenges for privileged roles
 - **Interactive Console**: Easy-to-use TUI with back navigation and live countdown timers
 - **Auto-Dependencies**: Automatically installs required modules on first run
+- **Smart Duration Handling**: If requested duration exceeds a role's policy maximum, each role activates for its individual policy limit
 
 ## Demo
 
@@ -109,6 +110,11 @@ When using a custom app registration, configure it with:
   - `RoleManagement.Read.Directory`
   - `RoleManagementPolicy.Read.Directory`
 
+**Additional permissions for Groups PIM:**
+  - `PrivilegedAssignmentSchedule.ReadWrite.AzureADGroup`
+  - `PrivilegedEligibilitySchedule.Read.AzureADGroup`
+  - `RoleManagementPolicy.Read.AzureADGroup`
+
 ## Available Commands
 
 - **Start-EntraPIM** - Launch the PIM role management tool
@@ -171,15 +177,21 @@ The version check:
 [System.Environment]::SetEnvironmentVariable('ENTRAPIM_DISABLE_UPDATE_CHECK', 'true', 'User')
 ```
 
-## What's New in 2.3.0
+## What's New in 2.3.1
 
+- **Groups PIM Support**: Activate/deactivate Entra Groups PIM memberships (member and owner roles)
+- **Policy Duration Display**: Selection menu shows each group's maximum allowed duration
+- **Activation Preview**: When requested duration exceeds policy limits, preview shows which groups will be capped
+- **Smart Duration Capping**: Each group activates for its individual policy maximum if your request exceeds it
+
+### Previous Highlights
+
+**Version 2.3.0**
 - **Back Navigation**: Every menu now has a `← Back` item — no more restarting the workflow if you pick the wrong option
 - **Live Countdown Timers**: Deactivation role selection shows expiration time counting down in real time (updates every second)
 - **Smart Azure Back**: Back from the Azure action menu returns to subscription selection, not all the way to the workflow selector
 - **Activation Step-Back**: ESC navigates backward through the activation form (reason → duration → role selection)
 - **Countdown Back**: The 5-minute deactivation countdown screen now lets you go back instead of waiting
-
-### Previous Highlights
 
 **Version 2.2.8**
 - Fixed Azure PIM group-based role activation (uses user OID from JWT token)
@@ -203,4 +215,4 @@ The version check:
 
 ## Tags
 
-Entra, PIM, Azure, Identity, Governance, MicrosoftGraph, Privileged, RoleManagement, AzureResources, CrossPlatform, PowerShell
+Entra, PIM, Azure, Identity, Governance, MicrosoftGraph, Privileged, RoleManagement, AzureResources, Groups, CrossPlatform, PowerShell

@@ -11,6 +11,7 @@ function Get-EntraPIMHelp {
     .DESCRIPTION
         Shows all available Entra-PIM commands with examples and usage information.
         Includes detailed guidance on configuration options.
+        Entra-PIM supports Entra ID roles, Azure Resource roles, and Groups PIM.
 
     .EXAMPLE
         Get-EntraPIMHelp
@@ -26,7 +27,7 @@ function Get-EntraPIMHelp {
     Write-Host "═══════════" -ForegroundColor Yellow
     Write-Host "  Start-EntraPIM" -ForegroundColor White
     Write-Host "    Launch the Entra-PIM role management tool" -ForegroundColor Gray
-    Write-Host "    Uses default Microsoft Graph authentication`n" -ForegroundColor Gray
+    Write-Host "    Supports Entra ID roles, Azure Resource roles, and Groups PIM`n" -ForegroundColor Gray
 
     Write-Host "CONFIGURATION COMMANDS" -ForegroundColor Yellow
     Write-Host "══════════════════════" -ForegroundColor Yellow
@@ -70,7 +71,18 @@ function Get-EntraPIMHelp {
     Write-Host "    - RoleAssignmentSchedule.ReadWrite.Directory" -ForegroundColor DarkGray
     Write-Host "    - RoleEligibilitySchedule.ReadWrite.Directory" -ForegroundColor DarkGray
     Write-Host "    - RoleManagement.Read.Directory" -ForegroundColor DarkGray
-    Write-Host "    - RoleManagementPolicy.Read.Directory`n" -ForegroundColor DarkGray
+    Write-Host "    - RoleManagementPolicy.Read.Directory" -ForegroundColor DarkGray
+    Write-Host "  • For Groups PIM (additional):" -ForegroundColor Gray
+    Write-Host "    - PrivilegedAssignmentSchedule.ReadWrite.AzureADGroup" -ForegroundColor DarkGray
+    Write-Host "    - PrivilegedEligibilitySchedule.Read.AzureADGroup" -ForegroundColor DarkGray
+    Write-Host "    - RoleManagementPolicy.Read.AzureADGroup`n" -ForegroundColor DarkGray
+
+    Write-Host "DURATION BEHAVIOR" -ForegroundColor Yellow
+    Write-Host "═════════════════" -ForegroundColor Yellow
+    Write-Host "  • Each role/group has a policy-defined maximum duration" -ForegroundColor Gray
+    Write-Host "  • If your requested duration exceeds a role's max, that role" -ForegroundColor Gray
+    Write-Host "    activates for its individual policy maximum" -ForegroundColor Gray
+    Write-Host "  • A preview is shown before activation when limits apply`n" -ForegroundColor Gray
 
     Write-Host "ADDITIONAL HELP" -ForegroundColor Yellow
     Write-Host "═══════════════" -ForegroundColor Yellow

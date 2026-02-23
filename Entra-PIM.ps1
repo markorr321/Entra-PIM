@@ -11,6 +11,9 @@ param(
 $script:CustomClientId = $ClientId
 $script:CustomTenantId = $TenantId
 
+# ========================= Version =========================
+$script:Version = "2.3.1"
+
 # ========================= Cross-Platform Keyboard Shortcuts =========================
 # Detect if running on macOS (use built-in $IsMacOS variable if available)
 $script:IsRunningOnMac = if ($null -ne $IsMacOS) { $IsMacOS } else { $PSVersionTable.OS -match 'Darwin' }
@@ -241,10 +244,64 @@ public class PIMBrowserAuth
 
         using (var cts = new CancellationTokenSource(TimeSpan.FromSeconds(180)))
         {
+            var webViewOptions = new SystemWebViewOptions
+            {
+                HtmlMessageSuccess = @"
+<html>
+<head>
+    <meta charset='UTF-8'>
+    <title>Authentication Successful - Entra PIM</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); }
+        .container { text-align: center; color: white; }
+        .brand { font-size: 14px; letter-spacing: 4px; margin-bottom: 30px; opacity: 0.9; }
+        .version { font-size: 12px; opacity: 0.7; }
+        .checkmark { font-size: 64px; margin-bottom: 20px; }
+        h1 { margin: 0 0 10px 0; font-weight: 300; font-size: 28px; }
+        p { margin: 0; opacity: 0.9; font-size: 16px; }
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <div class='brand'>[ E N T R A &nbsp; P I M ] <span class='version'>v2.3.1</span></div>
+        <div class='checkmark'>&#10003;</div>
+        <h1>Authentication Successful</h1>
+        <p>You can close this window and return to PowerShell.</p>
+        <p style='margin-top: 40px; font-size: 12px; opacity: 0.6;'>by Mark Orr</p>
+    </div>
+</body>
+</html>",
+                HtmlMessageError = @"
+<html>
+<head>
+    <meta charset='UTF-8'>
+    <title>Authentication Failed - Entra PIM</title>
+    <style>
+        body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; display: flex; justify-content: center; align-items: center; height: 100vh; margin: 0; background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%); }
+        .container { text-align: center; color: white; }
+        .brand { font-size: 14px; letter-spacing: 4px; margin-bottom: 30px; opacity: 0.9; }
+        .version { font-size: 12px; opacity: 0.7; }
+        .icon { font-size: 64px; margin-bottom: 20px; }
+        h1 { margin: 0 0 10px 0; font-weight: 300; font-size: 28px; }
+        p { margin: 0; opacity: 0.9; font-size: 16px; }
+    </style>
+</head>
+<body>
+    <div class='container'>
+        <div class='brand'>[ E N T R A &nbsp; P I M ] <span class='version'>v2.3.1</span></div>
+        <div class='icon'>&#10005;</div>
+        <h1>Authentication Failed</h1>
+        <p>Please close this window and try again.</p>
+        <p style='margin-top: 40px; font-size: 12px; opacity: 0.6;'>by Mark Orr</p>
+    </div>
+</body>
+</html>"
+            };
+
             var tokenBuilder = publicClientApp.AcquireTokenInteractive(scopes)
                 .WithPrompt(Prompt.SelectAccount)
                 .WithUseEmbeddedWebView(false)
-                .WithSystemWebViewOptions(new SystemWebViewOptions());
+                .WithSystemWebViewOptions(webViewOptions);
             
             // Add extra query parameters to hint at the tenant
             if (!string.IsNullOrEmpty(tenantId))
@@ -605,7 +662,7 @@ function Get-EligibleRolesOptimized {
         
         $sw2 = [System.Diagnostics.Stopwatch]::StartNew()
         try {
-            $activeResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignmentScheduleInstances?`$filter=principalId eq '$CurrentUserId' and assignmentType eq 'Activated'&`$select=roleDefinitionId,endDateTime" -ErrorAction Stop
+            $activeResponse = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/roleManagement/directory/roleAssignmentScheduleInstances?`$filter=principalId eq '$CurrentUserId'&`$select=roleDefinitionId,endDateTime,assignmentType" -ErrorAction Stop
             $activatedAssignments = if ($activeResponse -and $activeResponse.value) { $activeResponse.value } else { @() }
         } catch { $activatedAssignments = @() }
         $sw2.Stop()
@@ -638,12 +695,14 @@ function Get-EligibleRolesOptimized {
         $sw4.Stop()
         Write-Host " [C:$($sw4.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
         
-        # Process active assignments
+        # Process active and permanently assigned roles
         $activeRoleIds = @()
         if ($activatedAssignments -and $activatedAssignments.Count -gt 0) {
             $currentTime = Get-Date
             $activeRoleIds = $activatedAssignments | Where-Object {
-                $null -ne $_.endDateTime -and [DateTime]::Parse($_.endDateTime, [System.Globalization.CultureInfo]::InvariantCulture).ToLocalTime() -gt $currentTime
+                # Exclude permanent assignments (Assigned) and currently active PIM-activated roles
+                $_.assignmentType -eq 'Assigned' -or
+                ($null -ne $_.endDateTime -and [DateTime]::Parse($_.endDateTime, [System.Globalization.CultureInfo]::InvariantCulture).ToLocalTime() -gt $currentTime)
             } | Select-Object -ExpandProperty roleDefinitionId -Unique
         }
         
@@ -676,7 +735,7 @@ function Get-EligibleRolesOptimized {
 function Show-HelpMenu {
     [Console]::CursorVisible = $false
     Clear-Host
-    Write-Host "[ E N T R A   P I M ]" -ForegroundColor Cyan
+    Write-Host "[ E N T R A   P I M ]" -ForegroundColor Magenta
     Write-Host ""
     Write-Host "📖 Help Menu" -ForegroundColor Cyan
     Write-Host ""
@@ -695,6 +754,8 @@ function Show-HelpMenu {
     Write-Host "  • Roles must be active 5 min before deactivation"
     Write-Host "  • Minimum activation duration is 5 minutes"
     Write-Host "  • Justification required for all activations"
+    Write-Host "  • If requested duration exceeds policy max, each role/group"
+    Write-Host "    activates for its individual policy maximum"
     Write-Host ""
     Write-Host "Press any key to return..." -ForegroundColor Magenta
     $null = [Console]::ReadKey($true)
@@ -719,7 +780,6 @@ function Show-DynamicExpirationMenu {
             Show-PIMGlobalHeaderMinimal
             Write-Host ""
             Write-Host $Title -ForegroundColor Cyan
-            Write-Host ("=" * $Title.Length) -ForegroundColor Cyan
             Write-Host ""
             
             # Filter out expired roles and check if any remain
@@ -1277,6 +1337,18 @@ function Start-RoleDeactivationWorkflowWithCheck {
     $global:ActiveRoleCacheTime = $null
     
     Write-Host ""
+    # Show summary
+    if ($successCount -gt 0 -and $failCount -eq 0) {
+        Write-Host "✅ Total Entra Roles deactivated: $successCount" -ForegroundColor Green
+    } elseif ($successCount -gt 0 -and $failCount -gt 0) {
+        Write-Host "⚠️ Entra Roles Summary: $successCount deactivated, $failCount failed" -ForegroundColor Yellow
+    } elseif ($failCount -gt 0 -and $successCount -eq 0) {
+        Write-Host "❌ Entra Roles Summary: $failCount failed" -ForegroundColor Red
+    }
+    if ($skippedCount -gt 0) {
+        Write-Host "ℹ️ Skipped (already deactivated): $skippedCount" -ForegroundColor Gray
+    }
+    Write-Host ""
     
     # Ask if user wants to manage more roles
     do {
@@ -1533,6 +1605,18 @@ function Start-RoleDeactivationWorkflowWithCheck {
     }
     
     Write-Host ""
+    # Show summary
+    if ($successCount -gt 0 -and $failCount -eq 0) {
+        Write-Host "✅ Total Entra Roles deactivated: $successCount" -ForegroundColor Green
+    } elseif ($successCount -gt 0 -and $failCount -gt 0) {
+        Write-Host "⚠️ Entra Roles Summary: $successCount deactivated, $failCount failed" -ForegroundColor Yellow
+    } elseif ($failCount -gt 0 -and $successCount -eq 0) {
+        Write-Host "❌ Entra Roles Summary: $failCount failed" -ForegroundColor Red
+    }
+    if ($skippedCount -gt 0) {
+        Write-Host "ℹ️ Skipped (already deactivated): $skippedCount" -ForegroundColor Gray
+    }
+    Write-Host ""
     
     # Ask if user wants to manage more roles
     do {
@@ -1573,12 +1657,14 @@ function Start-RoleDeactivationWorkflowWithCheck {
 }
 
 function Show-PIMGlobalHeader {
-        Write-Host "[ E N T R A   P I M ]" -ForegroundColor Cyan
+        Write-Host "[ E N T R A   P I M ]" -ForegroundColor Magenta -NoNewline
+        Write-Host "  v$script:Version" -ForegroundColor DarkGray
         Write-Host "    with PowerShell" -ForegroundColor DarkGray
     }
     
     function Show-PIMGlobalHeaderMinimal {
-        Write-Host "[ E N T R A   P I M ]" -ForegroundColor Cyan
+        Write-Host "[ E N T R A   P I M ]" -ForegroundColor Magenta -NoNewline
+        Write-Host "  v$script:Version" -ForegroundColor DarkGray
     }
     
     # ========================= Centralized Control Menu System =========================
@@ -2094,6 +2180,11 @@ function Show-PIMGlobalHeader {
                             $encodedClaims = $claimsMatch.Groups[1].Value
                             $decodedClaims = [System.Web.HttpUtility]::UrlDecode($encodedClaims)
                             
+                            # Extract only the valid claims JSON
+                            if ($decodedClaims -match '(\{"access_token":\{"acrs":\{[^}]+\}\}\})') {
+                                $decodedClaims = $matches[1]
+                            }
+                            
                             try {
                                 # Get new token with claims challenge
                                 $scopes = @(
@@ -2147,6 +2238,15 @@ function Show-PIMGlobalHeader {
             }
         }
         
+        Write-Host ""
+        # Show summary
+        if ($successCount -gt 0 -and $failCount -eq 0) {
+            Write-Host "✅ Total Entra Roles activated: $successCount" -ForegroundColor Green
+        } elseif ($successCount -gt 0 -and $failCount -gt 0) {
+            Write-Host "⚠️ Entra Roles Summary: $successCount activated, $failCount failed" -ForegroundColor Yellow
+        } elseif ($failCount -gt 0 -and $successCount -eq 0) {
+            Write-Host "❌ Entra Roles Summary: $failCount failed" -ForegroundColor Red
+        }
         Write-Host ""
         
         # Ask if user wants to manage more roles
@@ -2416,7 +2516,7 @@ function Show-PIMGlobalHeader {
          
          # Clear screen and show header
         Clear-Host
-        Write-Host "[ E N T R A   P I M ]" -ForegroundColor DarkMagenta
+        Write-Host "[ E N T R A   P I M ]" -ForegroundColor Magenta
         Write-Host "PIM-Global Self-Activate - Automate Self-Activating PIM Roles via Microsoft Entra ID" -ForegroundColor Green
         
         # Initialize selection state
@@ -2510,7 +2610,7 @@ function Show-PIMGlobalHeader {
                 if (($currentTime - $lastUpdate).TotalSeconds -ge 1) {
                     # Always redraw header at top to ensure it's visible
                     [Console]::SetCursorPosition(0, 0)
-                    Write-Host "[ E N T R A   P I M ]" -ForegroundColor DarkMagenta
+                    Write-Host "[ E N T R A   P I M ]" -ForegroundColor Magenta
                     [Console]::SetCursorPosition(0, 1)
                     Write-Host ""  # Space between PIM-Global and Countdown
                     [Console]::SetCursorPosition(0, 2)
@@ -3029,7 +3129,6 @@ function Show-PIMGlobalHeader {
                 Show-PIMGlobalHeader
                     Write-Host ""
                 Write-Host $Title -ForegroundColor Cyan
-                Write-Host $("=" * $Title.Length) -ForegroundColor Cyan
                 Write-Host ""
                 
                 # Display menu items
@@ -3074,7 +3173,9 @@ function Show-PIMGlobalHeader {
             [switch]$PreserveContent = $false,
             [switch]$KeepSelectionVisible = $false,
             [string]$DisplayProperty = $null,
-            [switch]$ShowBack = $false
+            [switch]$ShowBack = $false,
+            [switch]$ShowSubtitle = $false,
+            [string]$HeaderStyle = "Entra"
         )
         
         if ($Items.Count -eq 0) {
@@ -3102,10 +3203,16 @@ function Show-PIMGlobalHeader {
             # Simple clean approach - just redraw everything each time
             do {
                     Clear-Host
-                Show-PIMGlobalHeaderMinimal
+                switch ($HeaderStyle) {
+                    "Groups" { Show-GroupsPIMHeader }
+                    "Azure"  { Show-AzurePIMHeader }
+                    default  { Show-PIMGlobalHeaderMinimal }
+                }
+                if ($ShowSubtitle) {
+                    Write-Host "    with PowerShell" -ForegroundColor DarkGray
+                }
                     Write-Host ""
                 Write-Host $Title -ForegroundColor Cyan
-                Write-Host $("=" * $Title.Length) -ForegroundColor Cyan
                 Write-Host ""
                 
                 # Show all roles
@@ -3752,6 +3859,18 @@ function Start-RoleDeactivationWorkflow {
     }
     
     Write-Host ""
+    # Show summary
+    if ($successCount -gt 0 -and $failCount -eq 0) {
+        Write-Host "✅ Total Entra Roles deactivated: $successCount" -ForegroundColor Green
+    } elseif ($successCount -gt 0 -and $failCount -gt 0) {
+        Write-Host "⚠️ Entra Roles Summary: $successCount deactivated, $failCount failed" -ForegroundColor Yellow
+    } elseif ($failCount -gt 0 -and $successCount -eq 0) {
+        Write-Host "❌ Entra Roles Summary: $failCount failed" -ForegroundColor Red
+    }
+    if ($skippedCount -gt 0) {
+        Write-Host "ℹ️ Skipped (already deactivated): $skippedCount" -ForegroundColor Gray
+    }
+    Write-Host ""
     
     # Ask if user wants to manage more roles
     do {
@@ -3801,10 +3920,11 @@ function Start-RoleDeactivationWorkflow {
 function Show-WorkflowSelector {
     $menuItems = @(
         "Entra ID Roles",
+        "Entra Group Roles",
         "Azure Resource Roles"
     )
 
-    $selectedIndices = Show-CheckboxMenu -Items $menuItems -Title "🔄 Select Workflow" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -SingleSelection
+    $selectedIndices = Show-CheckboxMenu -Items $menuItems -Title "🔄 Select Workflow" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -SingleSelection -ShowSubtitle
 
     if ($null -eq $selectedIndices -or $selectedIndices.Count -eq 0) {
         return 'Quit'
@@ -3813,7 +3933,8 @@ function Show-WorkflowSelector {
     $selectedIndex = $selectedIndices[0]
     switch ($selectedIndex) {
         0 { return 'Entra' }
-        1 { return 'Azure' }
+        1 { return 'Groups' }
+        2 { return 'Azure' }
         default { return 'Quit' }
     }
 }
@@ -3859,7 +3980,10 @@ function Invoke-AzurePIMApi {
 }
 
 function Get-AzureEligibleRoles {
-    param([switch]$Force)
+    param(
+        [switch]$Force,
+        [switch]$Silent
+    )
 
     if (-not $script:AzureSelectedSubscriptions -or $script:AzureSelectedSubscriptions.Count -eq 0) {
         return @()
@@ -3868,6 +3992,7 @@ function Get-AzureEligibleRoles {
     $allEligibleRoles = @()
 
     foreach ($sub in $script:AzureSelectedSubscriptions) {
+        $swSub = [System.Diagnostics.Stopwatch]::StartNew()
         Set-AzContext -SubscriptionId $sub.Id -ErrorAction SilentlyContinue | Out-Null
         $path = "/subscriptions/$($sub.Id)/providers/Microsoft.Authorization/roleEligibilityScheduleInstances?api-version=2020-10-01&`$filter=asTarget()"
 
@@ -3891,7 +4016,13 @@ function Get-AzureEligibleRoles {
                 }
             }
         } catch {
-            Write-Host "  ⚠️ Could not query subscription '$($sub.Name)'" -ForegroundColor Yellow
+            if (-not $Silent) {
+                Write-Host "  ⚠️ Could not query subscription '$($sub.Name)'" -ForegroundColor Yellow
+            }
+        }
+        $swSub.Stop()
+        if (-not $Silent) {
+            Write-Host " [$($swSub.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
         }
     }
 
@@ -3908,6 +4039,7 @@ function Get-AzureActiveRoles {
     $allActiveRoles = @()
 
     foreach ($sub in $script:AzureSelectedSubscriptions) {
+        $swSub = [System.Diagnostics.Stopwatch]::StartNew()
         Set-AzContext -SubscriptionId $sub.Id -ErrorAction SilentlyContinue | Out-Null
         $path = "/subscriptions/$($sub.Id)/providers/Microsoft.Authorization/roleAssignmentScheduleInstances?api-version=2020-10-01&`$filter=asTarget()"
 
@@ -3936,6 +4068,8 @@ function Get-AzureActiveRoles {
         } catch {
             Write-Host "  ⚠️ Could not query subscription '$($sub.Name)'" -ForegroundColor Yellow
         }
+        $swSub.Stop()
+        Write-Host " [$($swSub.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
     }
 
     return $allActiveRoles
@@ -3986,6 +4120,12 @@ function Start-AzureRoleActivation {
             if ($claimsMatch.Success) {
                 $encodedClaims = $claimsMatch.Groups[1].Value
                 $decodedClaims = [System.Web.HttpUtility]::UrlDecode($encodedClaims)
+                
+                # Extract only the valid claims JSON
+                if ($decodedClaims -match '(\{"access_token":\{"acrs":\{[^}]+\}\}\})') {
+                    $decodedClaims = $matches[1]
+                }
+                
                 return @{ Success = $false; Error = $errorMsg; ClaimsChallenge = $decodedClaims }
             }
         }
@@ -4047,7 +4187,7 @@ function Start-AzurePIMWorkflow {
     # Load Az modules with progress bar
     Clear-Host
     Write-Host ""
-    Write-Host "[ A Z U R E   P I M ]" -ForegroundColor Cyan
+    Write-Host "[ A Z U R E   P I M ]" -ForegroundColor Magenta
     Write-Host "    with PowerShell" -ForegroundColor DarkGray
     Write-Host ""
 
@@ -4114,7 +4254,7 @@ function Start-AzurePIMWorkflow {
         $script:AzureCurrentUserId = $claims.oid
 
         # Connect to Azure using the MSAL token (without SkipValidation to avoid needing subscription)
-        $null = Connect-AzAccount -AccessToken $accessToken -AccountId $accountId -Tenant $tenantId -ErrorAction Stop
+        $null = Connect-AzAccount -AccessToken $accessToken -AccountId $accountId -Tenant $tenantId -ErrorAction Stop -WarningAction SilentlyContinue
 
         $context = Get-AzContext
         if (-not $context) {
@@ -4125,13 +4265,14 @@ function Start-AzurePIMWorkflow {
         Write-Host "✅ Account: $($context.Account.Id)" -ForegroundColor Green
 
         # First, try to get PIM eligible roles directly (works even without subscription access)
-        Write-Host "🔄 Checking for PIM eligible roles..." -ForegroundColor Cyan
-        
+        Write-Host "🔄 Checking for PIM eligible roles..." -ForegroundColor Cyan -NoNewline
+
         # Use the original access token from MSAL (already has management.azure.com scope)
         $headers = @{ Authorization = "Bearer $accessToken" }
-        
+
         # Get eligible role assignments across all scopes the user can see
         $pimEligibleRoles = @()
+        $swEligible = [System.Diagnostics.Stopwatch]::StartNew()
         try {
             # Query at root scope to find all eligible assignments
             $uri = "https://management.azure.com/providers/Microsoft.Authorization/roleEligibilityScheduleInstances?api-version=2020-10-01&`$filter=asTarget()"
@@ -4142,6 +4283,8 @@ function Start-AzurePIMWorkflow {
         } catch {
             # If root scope fails, that's okay - we'll try subscriptions next
         }
+        $swEligible.Stop()
+        Write-Host " [E:$($swEligible.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray
         
         if ($pimEligibleRoles.Count -gt 0) {
             Write-Host "✅ Found $($pimEligibleRoles.Count) PIM eligible role(s)" -ForegroundColor Green
@@ -4169,13 +4312,38 @@ function Start-AzurePIMWorkflow {
                     Id = $subId
                 }
             }
+
+            # Build normalized role objects from root-scope data (reuse for Browse All Roles)
+            $allNormalizedRoles = @()
+            foreach ($role in $pimEligibleRoles) {
+                $subId = $null
+                $subName = "Unknown"
+                if ($role.properties.scope -match '/subscriptions/([^/]+)') {
+                    $subId = $matches[1]
+                }
+                $matchingSub = $subscriptions | Where-Object { $_.Id -eq $subId } | Select-Object -First 1
+                if ($matchingSub) { $subName = $matchingSub.Name }
+
+                $allNormalizedRoles += [PSCustomObject]@{
+                    Id               = $role.id
+                    Name             = $role.name
+                    RoleDefinitionId = $role.properties.roleDefinitionId
+                    RoleDisplayName  = $role.properties.expandedProperties.roleDefinition.displayName
+                    Scope            = $role.properties.scope
+                    ScopeDisplayName = $role.properties.expandedProperties.scope.displayName
+                    ScopeType        = $role.properties.expandedProperties.scope.type
+                    PrincipalId      = $role.properties.principalId
+                    SubscriptionId   = $subId
+                    SubscriptionName = $subName
+                }
+            }
         } else {
             # Fallback: Get subscriptions - include tenant ID to ensure we get all
-            $subscriptions = @(Get-AzSubscription -TenantId $tenantId -ErrorAction SilentlyContinue)
-            
+            $subscriptions = @(Get-AzSubscription -TenantId $tenantId -ErrorAction SilentlyContinue -WarningAction SilentlyContinue)
+
             # If still no subscriptions, try without tenant filter
             if ($subscriptions.Count -eq 0) {
-                $subscriptions = @(Get-AzSubscription -ErrorAction SilentlyContinue)
+                $subscriptions = @(Get-AzSubscription -ErrorAction SilentlyContinue -WarningAction SilentlyContinue)
             }
         }
         
@@ -4208,35 +4376,96 @@ function Start-AzurePIMWorkflow {
         $script:AzureCurrentUserId = (Get-AzContext).Account.Id
     }
 
-    # Subscription selection + role management loop
-    # Back from action menu returns here to re-pick subscription
-    do {
-        $selectedSubIndices = Show-CheckboxMenu -Items $subItems -Title "📦 Select Subscription" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -DisplayProperty "Name" -SingleSelection -ShowBack
+    # Show view-mode menu when we have normalized role data from root-scope API
+    if ($allNormalizedRoles.Count -gt 0) {
+        do {
+            $viewModeItems = @(
+                "Browse All Roles",
+                "Filter by Subscription"
+            )
 
-        # Back returns to workflow selector
-        if ($selectedSubIndices -eq "BACK") {
-            return
-        }
+            $viewModeSelection = Show-AzureCheckboxMenu -Items $viewModeItems -Title "📦 How would you like to find roles?" -Prompt "Use arrow keys to navigate, SPACE to select, ENTER to confirm:" -SingleSelection -ShowBack
 
-        if ($selectedSubIndices.Count -eq 0) {
-            return
-        }
+            if ($viewModeSelection -eq "BACK") {
+                return
+            }
 
-        $selectedSub = $subscriptions[$selectedSubIndices[0]]
-        $script:AzureSelectedSubscriptions = @([PSCustomObject]@{
-            Id   = $selectedSub.Id
-            Name = $selectedSub.Name
-        })
+            if ($null -eq $viewModeSelection -or $viewModeSelection.Count -eq 0) {
+                return
+            }
 
-        Set-AzContext -SubscriptionId $selectedSub.Id -ErrorAction SilentlyContinue | Out-Null
+            $viewMode = $viewModeSelection[0]
 
-        Start-AzurePIMRoleManagement
-        # When Start-AzurePIMRoleManagement returns (via BACK), loop back to subscription selection
-    } while ($true)
+            if ($viewMode -eq 0) {
+                # Browse All Roles path
+                Show-AzureBrowseAllRolesUI -AllRoles $allNormalizedRoles -Subscriptions $subscriptions
+                # When Browse All returns (via BACK), loop back to view-mode menu
+            } else {
+                # Filter by Subscription path
+                if ($subscriptions.Count -eq 1) {
+                    # Auto-select the only subscription
+                    $selectedSub = $subscriptions[0]
+                    $script:AzureSelectedSubscriptions = @([PSCustomObject]@{
+                        Id   = $selectedSub.Id
+                        Name = $selectedSub.Name
+                    })
+                    Set-AzContext -SubscriptionId $selectedSub.Id -ErrorAction SilentlyContinue | Out-Null
+                    Start-AzurePIMRoleManagement
+                    # When role management returns (via BACK), loop back to view-mode menu
+                } else {
+                    do {
+                        $selectedSubIndices = Show-AzureCheckboxMenu -Items ($subItems | ForEach-Object { $_.Name }) -Title "📦 Select Subscription" -Prompt "Use arrow keys to navigate, SPACE to select, ENTER to confirm:" -SingleSelection -ShowBack
+
+                        if ($selectedSubIndices -eq "BACK") {
+                            break  # Back to view-mode menu
+                        }
+
+                        if ($null -eq $selectedSubIndices -or $selectedSubIndices.Count -eq 0) {
+                            break
+                        }
+
+                        $selectedSub = $subscriptions[$selectedSubIndices[0]]
+                        $script:AzureSelectedSubscriptions = @([PSCustomObject]@{
+                            Id   = $selectedSub.Id
+                            Name = $selectedSub.Name
+                        })
+
+                        Set-AzContext -SubscriptionId $selectedSub.Id -ErrorAction SilentlyContinue | Out-Null
+
+                        Start-AzurePIMRoleManagement
+                    } while ($true)
+                }
+            }
+        } while ($true)
+    } else {
+        # Fallback path (no PIM role data from root scope) - go directly to subscription selection
+        do {
+            $selectedSubIndices = Show-AzureCheckboxMenu -Items ($subItems | ForEach-Object { $_.Name }) -Title "📦 Select Subscription" -Prompt "Use arrow keys to navigate, SPACE to select, ENTER to confirm:" -SingleSelection -ShowBack
+
+            if ($selectedSubIndices -eq "BACK") {
+                return
+            }
+
+            if ($null -eq $selectedSubIndices -or $selectedSubIndices.Count -eq 0) {
+                return
+            }
+
+            $selectedSub = $subscriptions[$selectedSubIndices[0]]
+            $script:AzureSelectedSubscriptions = @([PSCustomObject]@{
+                Id   = $selectedSub.Id
+                Name = $selectedSub.Name
+            })
+
+            Set-AzContext -SubscriptionId $selectedSub.Id -ErrorAction SilentlyContinue | Out-Null
+
+            Start-AzurePIMRoleManagement
+        } while ($true)
+    }
 }
 
 function Show-AzurePIMHeader {
-    Write-Host "[ A Z U R E   P I M ]" -ForegroundColor Cyan
+    Write-Host "[ A Z U R E   P I M ]" -ForegroundColor Magenta -NoNewline
+    Write-Host "  v$script:Version" -ForegroundColor DarkGray
 }
 
 function Invoke-AzurePIMExit {
@@ -4290,7 +4519,6 @@ function Show-AzureCheckboxMenu {
             Show-AzurePIMHeader
             Write-Host ""
             Write-Host $Title -ForegroundColor Cyan
-            Write-Host $("=" * $Title.Length) -ForegroundColor Cyan
             Write-Host ""
 
             for ($i = 0; $i -lt $Items.Count; $i++) {
@@ -4298,15 +4526,16 @@ function Show-AzureCheckboxMenu {
                 $checkbox = if ($selected[$i]) { "[✓]" } else { "[ ]" }
                 $arrow = if ($i -eq $currentIndex) { "► " } else { "  " }
                 $line = "$arrow$checkbox $item"
-
+                
                 if ($selected[$i]) {
                     Write-Host $line -ForegroundColor Green
+                } elseif ($i -eq $currentIndex) {
+                    Write-Host $line -ForegroundColor Yellow
                 } else {
                     Write-Host $line -ForegroundColor White
                 }
             }
 
-            # Show Back item if enabled
             if ($ShowBack) {
                 $backArrow = if ($currentIndex -eq $backIndex) { "► " } else { "  " }
                 $backColor = if ($currentIndex -eq $backIndex) { "Yellow" } else { "Gray" }
@@ -4327,13 +4556,12 @@ function Show-AzureCheckboxMenu {
 
             $key = [Console]::ReadKey($true)
 
-            # Handle Ctrl+Q to exit
             if (Test-QuitShortcut -Key $key) {
                 Invoke-AzurePIMExit
             }
 
-            # Handle Ctrl+A to select all
-            if ($key.Modifiers -band [ConsoleModifiers]::Control -and $key.Key -eq 'A' -and -not $SingleSelection) {
+            # Handle Ctrl+A to select/deselect all
+            if (($key.Modifiers -band [ConsoleModifiers]::Control) -and $key.Key -eq "A" -and -not $SingleSelection) {
                 $allSelected = ($selected.Values | Where-Object { $_ }).Count -eq $Items.Count
                 for ($i = 0; $i -lt $Items.Count; $i++) {
                     $selected[$i] = -not $allSelected
@@ -4341,7 +4569,6 @@ function Show-AzureCheckboxMenu {
                 continue
             }
 
-            # Handle Ctrl+H for help
             if (Test-HelpShortcut -Key $key) {
                 Show-HelpMenu
                 continue
@@ -4355,7 +4582,6 @@ function Show-AzureCheckboxMenu {
                     $currentIndex = if ($currentIndex -lt ($totalDisplayItems - 1)) { $currentIndex + 1 } else { 0 }
                 }
                 "Spacebar" {
-                    # If on the Back item, treat as back action
                     if ($ShowBack -and $currentIndex -eq $backIndex) {
                         [Console]::CursorVisible = $true
                         return "BACK"
@@ -4370,7 +4596,6 @@ function Show-AzureCheckboxMenu {
                     }
                 }
                 "Enter" {
-                    # If on the Back item, treat as back action
                     if ($ShowBack -and $currentIndex -eq $backIndex) {
                         [Console]::CursorVisible = $true
                         return "BACK"
@@ -4395,6 +4620,304 @@ function Show-AzureCheckboxMenu {
     } finally {
         [Console]::CursorVisible = $true
     }
+}
+
+function Show-AzureGroupedCheckboxMenu {
+    param(
+        [Parameter(Mandatory)]
+        [array]$GroupedItems,
+        [string]$Title = "Select Items",
+        [string]$Prompt = "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:",
+        [switch]$ShowBack = $false
+    )
+
+    if ($GroupedItems.Count -eq 0) {
+        Write-Host "No items to select from." -ForegroundColor Red
+        return @()
+    }
+
+    # Build list of selectable indices (skip headers)
+    $selectableIndices = @()
+    for ($i = 0; $i -lt $GroupedItems.Count; $i++) {
+        if ($GroupedItems[$i].Type -eq 'Role') {
+            $selectableIndices += $i
+        }
+    }
+
+    if ($selectableIndices.Count -eq 0) {
+        Write-Host "No selectable items." -ForegroundColor Red
+        return @()
+    }
+
+    # Track selection state by role Index property
+    $selected = @{}
+    foreach ($idx in $selectableIndices) {
+        $selected[$GroupedItems[$idx].Index] = $false
+    }
+
+    # Add back item position
+    $backPosition = $GroupedItems.Count
+    $allPositions = $selectableIndices + @($backPosition)
+
+    # Current position in allPositions array
+    $currentPosIdx = 0
+    $currentIndex = $allPositions[$currentPosIdx]
+
+    [Console]::CursorVisible = $false
+
+    try {
+        do {
+            Clear-Host
+            Show-AzurePIMHeader
+            Write-Host ""
+            Write-Host $Title -ForegroundColor Cyan
+            Write-Host ""
+
+            for ($i = 0; $i -lt $GroupedItems.Count; $i++) {
+                $item = $GroupedItems[$i]
+                
+                if ($item.Type -eq 'Header') {
+                    Write-Host ""
+                    Write-Host "  📦 $($item.Text)" -ForegroundColor DarkCyan
+                    $headerLen = $item.Text.Length + 4
+                    Write-Host "  $('─' * $headerLen)" -ForegroundColor DarkGray
+                } else {
+                    $roleIdx = $item.Index
+                    $checkbox = if ($selected[$roleIdx]) { "[✓]" } else { "[ ]" }
+                    $arrow = if ($i -eq $currentIndex) { "► " } else { "  " }
+                    $line = "$arrow$checkbox $($item.Text)"
+
+                    if ($selected[$roleIdx]) {
+                        Write-Host $line -ForegroundColor Green
+                    } elseif ($i -eq $currentIndex) {
+                        Write-Host $line -ForegroundColor Yellow
+                    } else {
+                        Write-Host $line -ForegroundColor White
+                    }
+                }
+            }
+
+            if ($ShowBack) {
+                Write-Host ""
+                $backArrow = if ($currentIndex -eq $backPosition) { "► " } else { "  " }
+                $backColor = if ($currentIndex -eq $backPosition) { "Yellow" } else { "Gray" }
+                Write-Host "$backArrow← Back" -ForegroundColor $backColor
+            }
+
+            Write-Host ""
+            $selectedCount = ($selected.GetEnumerator() | Where-Object { $_.Value }).Count
+            Write-Host "Roles Selected: $selectedCount" -ForegroundColor Cyan
+            Write-Host ""
+            Write-Host "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | $(Get-HelpShortcutText) | $(Get-QuitShortcutText)" -ForegroundColor Magenta
+
+            $key = [Console]::ReadKey($true)
+
+            if (Test-QuitShortcut -Key $key) {
+                Invoke-AzurePIMExit
+            }
+
+            # Handle Ctrl+A to select/deselect all
+            if (($key.Modifiers -band [ConsoleModifiers]::Control) -and $key.Key -eq "A") {
+                $allSelected = ($selected.Values | Where-Object { $_ }).Count -eq $selectableIndices.Count
+                foreach ($idx in $selectableIndices) {
+                    $selected[$GroupedItems[$idx].Index] = -not $allSelected
+                }
+                continue
+            }
+
+            if (Test-HelpShortcut -Key $key) {
+                Show-HelpMenu
+                continue
+            }
+
+            switch ($key.Key) {
+                "UpArrow" {
+                    $currentPosIdx = if ($currentPosIdx -gt 0) { $currentPosIdx - 1 } else { $allPositions.Count - 1 }
+                    $currentIndex = $allPositions[$currentPosIdx]
+                }
+                "DownArrow" {
+                    $currentPosIdx = if ($currentPosIdx -lt ($allPositions.Count - 1)) { $currentPosIdx + 1 } else { 0 }
+                    $currentIndex = $allPositions[$currentPosIdx]
+                }
+                "Spacebar" {
+                    if ($ShowBack -and $currentIndex -eq $backPosition) {
+                        [Console]::CursorVisible = $true
+                        return "BACK"
+                    }
+                    if ($currentIndex -lt $GroupedItems.Count) {
+                        $roleIdx = $GroupedItems[$currentIndex].Index
+                        $selected[$roleIdx] = -not $selected[$roleIdx]
+                    }
+                }
+                "Enter" {
+                    if ($ShowBack -and $currentIndex -eq $backPosition) {
+                        [Console]::CursorVisible = $true
+                        return "BACK"
+                    }
+                    $selectedItems = @()
+                    foreach ($entry in $selected.GetEnumerator()) {
+                        if ($entry.Value) {
+                            $selectedItems += $entry.Key
+                        }
+                    }
+                    [Console]::CursorVisible = $true
+                    return $selectedItems
+                }
+                "Escape" {
+                    [Console]::CursorVisible = $true
+                    if ($ShowBack) { return "BACK" }
+                    return @()
+                }
+            }
+
+        } while ($true)
+    } finally {
+        [Console]::CursorVisible = $true
+    }
+}
+
+function Show-AzureBrowseAllRolesUI {
+    param(
+        [array]$AllRoles,
+        [array]$Subscriptions
+    )
+
+    do {
+        # Set AzureSelectedSubscriptions to ALL subscriptions for API queries
+        $script:AzureSelectedSubscriptions = $Subscriptions | ForEach-Object {
+            [PSCustomObject]@{ Id = $_.Id; Name = $_.Name }
+        }
+
+        # Show Activate/Deactivate action menu
+        $menuItems = @(
+            "Activate Roles",
+            "Deactivate Roles"
+        )
+
+        $selectedIndices = Show-AzureCheckboxMenu -Items $menuItems -Title "🔄 Choose Action" -Prompt "Use arrow keys to navigate, SPACE to select, ENTER to confirm:" -SingleSelection -ShowBack
+
+        if ($selectedIndices -eq "BACK") { return }
+        if ($null -eq $selectedIndices -or $selectedIndices.Count -eq 0) { return }
+
+        $selectedAction = $menuItems[$selectedIndices[0]]
+
+        if ($selectedAction -eq "Activate Roles") {
+            Clear-Host
+            Show-AzurePIMHeader
+            Write-Host ""
+            Write-Host "🔄 Loading roles across all subscriptions..." -ForegroundColor Cyan -NoNewline
+
+            # Get active roles across ALL subscriptions to filter them out
+            $activeRoles = Get-AzureActiveRoles
+
+            # Filter out already active roles
+            $activeKeys = $activeRoles | ForEach-Object { "$($_.RoleDefinitionId)|$($_.Scope)" }
+            $availableRoles = @($AllRoles | Where-Object {
+                $key = "$($_.RoleDefinitionId)|$($_.Scope)"
+                $activeKeys -notcontains $key
+            })
+
+            if ($availableRoles.Count -gt 0) {
+                Write-Host " ✅ $($availableRoles.Count) available" -ForegroundColor Green
+                Start-Sleep -Milliseconds 800
+            } else {
+                Write-Host ""
+            }
+
+            if ($availableRoles.Count -eq 0) {
+                Write-Host ""
+                Write-Host "❌ No eligible roles available for activation." -ForegroundColor Red
+                Write-Host ""
+
+                if ($activeRoles.Count -gt 0) {
+                    Write-Host "Would you like to deactivate roles instead? (Y/N): " -NoNewline -ForegroundColor Cyan
+                    [Console]::CursorVisible = $true
+
+                    $promptLeft = [Console]::CursorLeft
+                    $promptTop = [Console]::CursorTop
+
+                    Write-Host "`n"
+                    Write-Host "Y/N to choose | $(Get-QuitShortcutText)" -ForegroundColor Magenta
+                    [Console]::SetCursorPosition($promptLeft, $promptTop)
+
+                    $userInput = ""
+                    do {
+                        $key = [Console]::ReadKey($true)
+                        if (Test-QuitShortcut -Key $key) { Invoke-AzurePIMExit; return }
+                        if ($key.Key -eq 'Enter') {
+                            if ($userInput -eq 'Y') {
+                                Start-AzureRoleDeactivationWorkflow -ActiveRoles $activeRoles
+                                break
+                            } elseif ($userInput -eq 'N') {
+                                break
+                            } else {
+                                Write-Host ""
+                                Write-Host "Please enter Y or N: " -NoNewline -ForegroundColor Yellow
+                                $userInput = ""
+                            }
+                        } elseif ($key.Key -eq 'Backspace' -and $userInput.Length -gt 0) {
+                            $userInput = $userInput.Substring(0, $userInput.Length - 1)
+                            Write-Host "`b `b" -NoNewline
+                        } elseif ($key.KeyChar -match '[YyNn]' -and $userInput.Length -eq 0) {
+                            $userInput = $key.KeyChar.ToString().ToUpper()
+                            Write-Host $userInput -NoNewline -ForegroundColor Green
+                        }
+                    } while ($true)
+                } else {
+                    Write-Host "Check back later when roles are approved." -ForegroundColor Gray
+                    Write-Host ""
+                    Write-Host "Press any key to continue..." -ForegroundColor Yellow
+                    [Console]::ReadKey($true) | Out-Null
+                }
+                continue
+            }
+
+            # Build flat role list for display
+            $roleItems = @()
+            $sortedRoles = $availableRoles | Sort-Object RoleDisplayName, SubscriptionName
+
+            foreach ($role in $sortedRoles) {
+                $friendlyScope = $role.ScopeDisplayName
+                if ($role.Scope -match '/resourceGroups/([^/]+)') {
+                    $friendlyScope = "RG: $($matches[1])"
+                } elseif ($role.ScopeType -eq 'Subscription' -or $role.Scope -match '/subscriptions/[^/]+$') {
+                    $friendlyScope = "Subscription"
+                }
+                $roleItems += "$($role.RoleDisplayName) > $($role.SubscriptionName) > $friendlyScope"
+            }
+
+            # Show flat role selection
+            $selectedRoleIndices = Show-AzureCheckboxMenu -Items $roleItems -Title "Select Roles to Activate" -ShowBack
+
+            if ($selectedRoleIndices -eq "BACK") { continue }
+            if ($null -eq $selectedRoleIndices -or $selectedRoleIndices.Count -eq 0) { continue }
+
+            # Map indices to actual role objects
+            $rolesToActivate = @()
+            foreach ($idx in $selectedRoleIndices) {
+                $rolesToActivate += $sortedRoles[$idx]
+            }
+
+            # Run the activation wizard
+            Show-AzureActivationWizard -RolesToActivate $rolesToActivate
+
+        } elseif ($selectedAction -eq "Deactivate Roles") {
+            Clear-Host
+            Show-AzurePIMHeader
+            Write-Host ""
+            Write-Host "🔄 Loading active roles across all subscriptions..." -ForegroundColor Cyan -NoNewline
+
+            $activeRoles = Get-AzureActiveRoles
+
+            if ($activeRoles.Count -gt 0) {
+                Write-Host " ✅ $($activeRoles.Count) found" -ForegroundColor Green
+            } else {
+                Write-Host ""
+            }
+
+            Start-AzureRoleDeactivationWorkflow -ActiveRoles $activeRoles
+        }
+    } while ($true)
 }
 
 function Start-AzurePIMRoleManagement {
@@ -4443,6 +4966,7 @@ function Start-AzurePIMRoleManagement {
 
             if ($availableForActivation.Count -gt 0) {
                 Write-Host " ✅ $($availableForActivation.Count) found" -ForegroundColor Green
+                Start-Sleep -Milliseconds 800
             } else {
                 Write-Host ""
                 Write-Host ""
@@ -4589,8 +5113,8 @@ function Start-AzureRoleDeactivationWorkflow {
         Write-Host "❌ No active roles available for deactivation." -ForegroundColor Red
         Write-Host ""
 
-        # Check if there are eligible roles to offer activation
-        $eligibleRoles = Get-AzureEligibleRoles
+        # Check if there are eligible roles to offer activation (silent to avoid timing output)
+        $eligibleRoles = Get-AzureEligibleRoles -Silent
         if ($eligibleRoles.Count -gt 0) {
             Write-Host "Would you like to activate roles instead? (Y/N): " -NoNewline -ForegroundColor Cyan
 
@@ -4699,7 +5223,7 @@ function Show-AzureRoleActivationUI {
         } elseif ($role.ScopeDisplayName -match '/subscriptions/[^/]+$') {
             $friendlyScope = "Subscription"
         }
-        $roleItems += "$($role.RoleDisplayName) - $friendlyScope"
+        $roleItems += "$($role.RoleDisplayName) > $friendlyScope"
     }
 
     # Show role selection using Azure checkbox menu with back option
@@ -4841,7 +5365,6 @@ function Show-AzureDynamicExpirationMenu {
             Show-AzurePIMHeader
             Write-Host ""
             Write-Host $Title -ForegroundColor Cyan
-            Write-Host ("=" * $Title.Length) -ForegroundColor Cyan
             Write-Host ""
 
             # Filter out expired roles and check if any remain
@@ -5075,7 +5598,7 @@ function Start-AzureRoleDeactivation {
         }
 
         $roleExpirationData += [PSCustomObject]@{
-            DisplayName = "$($role.RoleDisplayName) - $friendlyScope"
+            DisplayName = "$($role.RoleDisplayName) > $friendlyScope"
             ExpirationTime = $expirationTime
         }
     }
@@ -5109,23 +5632,25 @@ function Start-AzureRoleDeactivation {
 
     foreach ($role in $rolesToDeactivate) {
         $roleName = $role.RoleDisplayName
+        $subName = $role.SubscriptionName
         $result = Stop-AzureRoleActivation -ActiveRole $role
         if ($result.Success) {
-            Write-Host "✅ Successfully deactivated: $roleName" -ForegroundColor Green
+            Write-Host "✅ Successfully deactivated: $subName > $roleName" -ForegroundColor Green
             $successCount++
         } else {
-            Write-Host "❌ Failed to deactivate: $roleName - $($result.Error)" -ForegroundColor Red
+            Write-Host "❌ Failed to deactivate: $subName > $roleName - $($result.Error)" -ForegroundColor Red
             $failCount++
         }
     }
 
     Write-Host ""
+    # Show summary
     if ($successCount -gt 0 -and $failCount -eq 0) {
-        # No summary needed - individual messages are sufficient
+        Write-Host "✅ Total Azure Roles deactivated: $successCount" -ForegroundColor Green
     } elseif ($successCount -gt 0 -and $failCount -gt 0) {
-        Write-Host "⚠️ Deactivated $successCount role(s), $failCount failed" -ForegroundColor Yellow
+        Write-Host "⚠️ Azure Roles Summary: $successCount deactivated, $failCount failed" -ForegroundColor Yellow
     } elseif ($failCount -gt 0 -and $successCount -eq 0) {
-        Write-Host "❌ Failed to deactivate $failCount role(s)" -ForegroundColor Red
+        Write-Host "❌ Azure Roles Summary: $failCount failed" -ForegroundColor Red
     }
 
     Write-Host ""
@@ -5225,9 +5750,10 @@ function Show-AzureActivationWizard {
 
     foreach ($role in $RolesToActivate) {
         $roleName = $role.RoleDisplayName
+        $subName = $role.SubscriptionName
         $result = Start-AzureRoleActivation -EligibleRole $role -Justification $justification -Duration $duration
         if ($result.Success) {
-            Write-Host "✅ Role activation submitted for: $roleName" -ForegroundColor Green
+            Write-Host "✅ Role activation submitted for: $subName > $roleName" -ForegroundColor Green
             $successCount++
         } elseif ($result.ClaimsChallenge) {
             # Conditional Access requires step-up authentication (ACRS claim)
@@ -5252,38 +5778,39 @@ function Show-AzureActivationWizard {
                     # Reconnect to Azure with new token
                     Disconnect-AzAccount -ErrorAction SilentlyContinue | Out-Null
                     Clear-AzContext -Force -ErrorAction SilentlyContinue | Out-Null
-                    $null = Connect-AzAccount -AccessToken $newToken -AccountId $accountId -Tenant $tenantId -ErrorAction Stop
+                    $null = Connect-AzAccount -AccessToken $newToken -AccountId $accountId -Tenant $tenantId -ErrorAction Stop -WarningAction SilentlyContinue
                     
                     # Retry the activation request
                     $retryResult = Start-AzureRoleActivation -EligibleRole $role -Justification $justification -Duration $duration
                     if ($retryResult.Success) {
-                        Write-Host "✅ Role activation submitted for: $roleName" -ForegroundColor Green
+                        Write-Host "✅ Role activation submitted for: $subName > $roleName" -ForegroundColor Green
                         $successCount++
                     } else {
-                        Write-Host "❌ Failed to activate: $roleName - $($retryResult.Error)" -ForegroundColor Red
+                        Write-Host "❌ Failed to activate: $subName > $roleName - $($retryResult.Error)" -ForegroundColor Red
                         $failCount++
                     }
                 } else {
-                    Write-Host "❌ Failed to activate: $roleName - Step-up authentication failed" -ForegroundColor Red
+                    Write-Host "❌ Failed to activate: $subName > $roleName - Step-up authentication failed" -ForegroundColor Red
                     $failCount++
                 }
             } catch {
-                Write-Host "❌ Failed to activate: $roleName - $($_.Exception.Message)" -ForegroundColor Red
+                Write-Host "❌ Failed to activate: $subName > $roleName - $($_.Exception.Message)" -ForegroundColor Red
                 $failCount++
             }
         } else {
-            Write-Host "❌ Failed to activate: $roleName - $($result.Error)" -ForegroundColor Red
+            Write-Host "❌ Failed to activate: $subName > $roleName - $($result.Error)" -ForegroundColor Red
             $failCount++
         }
     }
 
     Write-Host ""
+    # Show summary
     if ($successCount -gt 0 -and $failCount -eq 0) {
-        # No summary needed - individual messages are sufficient
+        Write-Host "✅ Total Azure Roles activated: $successCount" -ForegroundColor Green
     } elseif ($successCount -gt 0 -and $failCount -gt 0) {
-        Write-Host "⚠️ Activated $successCount role(s), $failCount failed" -ForegroundColor Yellow
+        Write-Host "⚠️ Azure Roles Summary: $successCount activated, $failCount failed" -ForegroundColor Yellow
     } elseif ($failCount -gt 0 -and $successCount -eq 0) {
-        Write-Host "❌ Failed to activate $failCount role(s)" -ForegroundColor Red
+        Write-Host "❌ Azure Roles Summary: $failCount failed" -ForegroundColor Red
     }
 
     Write-Host ""
@@ -5331,6 +5858,1354 @@ function Show-AzureActivationWizard {
 
     return $true
 }
+
+# ========================= Groups PIM Functions =========================
+
+function Show-GroupsPIMHeader {
+    Write-Host "[ P I M   G R O U P S ]" -ForegroundColor Magenta -NoNewline
+    Write-Host "  v$script:Version" -ForegroundColor DarkGray
+}
+
+function Invoke-GroupsPIMExit {
+    param(
+        [string]$Message = "Exiting..."
+    )
+
+    [Console]::CursorVisible = $true
+    Clear-Host
+    Write-Host $Message -ForegroundColor Yellow
+
+    try {
+        Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+        Write-Host "✅ Disconnected from Microsoft Graph." -ForegroundColor Green
+    } catch {
+        Write-Host "ℹ️ Already disconnected from Microsoft Graph." -ForegroundColor DarkGray
+    }
+
+    Write-Host ""
+    exit 0
+}
+
+function Get-GroupPolicyMaxDuration {
+    <#
+    .SYNOPSIS
+        Gets the maximum activation duration allowed by a group's PIM policy.
+    #>
+    param(
+        [Parameter(Mandatory)]
+        [string]$GroupId,
+        [Parameter(Mandatory)]
+        [string]$AccessId
+    )
+
+    try {
+        # Policy assignments are under /policies/, not /identityGovernance/privilegedAccess/group/
+        $filter = "scopeId eq '$GroupId' and scopeType eq 'Group' and roleDefinitionId eq '$AccessId'"
+        $uri = "https://graph.microsoft.com/v1.0/policies/roleManagementPolicyAssignments?`$filter=$filter&`$expand=policy(`$expand=rules)"
+        
+        $response = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
+
+        if (-not $response.value -or $response.value.Count -eq 0) {
+            return "PT8H"  # Default 8 hours
+        }
+
+        $policy = $response.value[0].policy
+        if (-not $policy -or -not $policy.rules) {
+            return "PT8H"
+        }
+
+        # Find the expiration rule for end-user assignment (activation)
+        $expirationRule = $policy.rules | Where-Object { $_.'@odata.type' -eq '#microsoft.graph.unifiedRoleManagementPolicyExpirationRule' -and $_.id -eq "Expiration_EndUser_Assignment" }
+        
+        if (-not $expirationRule) {
+            # Try without the @odata.type filter
+            $expirationRule = $policy.rules | Where-Object { $_.id -eq "Expiration_EndUser_Assignment" }
+        }
+        
+        if ($expirationRule -and $expirationRule.maximumDuration) {
+            return $expirationRule.maximumDuration
+        }
+
+        return "PT8H"
+    }
+    catch {
+        return "PT8H"
+    }
+}
+
+function Convert-ISO8601ToMinutes {
+    <#
+    .SYNOPSIS
+        Converts ISO 8601 duration to total minutes.
+    #>
+    param([string]$Duration)
+    
+    $totalMinutes = 0
+    if ($Duration -match 'PT(\d+)H') { $totalMinutes += [int]$matches[1] * 60 }
+    if ($Duration -match '(\d+)M') { $totalMinutes += [int]$matches[1] }
+    return $totalMinutes
+}
+
+function Convert-ISO8601ToFriendly {
+    <#
+    .SYNOPSIS
+        Converts ISO 8601 duration to friendly format like "8H" or "2H30M".
+    #>
+    param([string]$Duration)
+    
+    $hours = 0
+    $minutes = 0
+    if ($Duration -match 'PT(\d+)H') { $hours = [int]$matches[1] }
+    if ($Duration -match '(\d+)M') { $minutes = [int]$matches[1] }
+    
+    if ($hours -gt 0 -and $minutes -gt 0) {
+        return "${hours}H${minutes}M"
+    } elseif ($hours -gt 0) {
+        return "${hours}H"
+    } elseif ($minutes -gt 0) {
+        return "${minutes}M"
+    } else {
+        return "8H"
+    }
+}
+
+function Get-EligibleGroupsOptimized {
+    param([string]$CurrentUserId)
+
+    $allEligibleGroups = @()
+    $activeGroupKeys = @()
+
+    try {
+        $swTotal = [System.Diagnostics.Stopwatch]::StartNew()
+
+        # Fetch eligible group assignments
+        $sw1 = [System.Diagnostics.Stopwatch]::StartNew()
+        $eligibleUri = "https://graph.microsoft.com/v1.0/identityGovernance/privilegedAccess/group/eligibilitySchedules?`$filter=principalId eq '$CurrentUserId'&`$expand=group"
+        $eligibleResponse = Invoke-MgGraphRequest -Method GET -Uri $eligibleUri -ErrorAction Stop
+        $eligibleSchedules = if ($eligibleResponse -and $eligibleResponse.value) { $eligibleResponse.value } else { @() }
+        $sw1.Stop()
+        Write-Host " [E:$($sw1.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
+
+        # Fetch active group assignments to filter them out
+        $sw2 = [System.Diagnostics.Stopwatch]::StartNew()
+        try {
+            $activeUri = "https://graph.microsoft.com/v1.0/identityGovernance/privilegedAccess/group/assignmentScheduleInstances?`$filter=principalId eq '$CurrentUserId'"
+            $activeResponse = Invoke-MgGraphRequest -Method GET -Uri $activeUri -ErrorAction Stop
+            $activeAssignments = if ($activeResponse -and $activeResponse.value) { $activeResponse.value } else { @() }
+        } catch { $activeAssignments = @() }
+        $sw2.Stop()
+        Write-Host " [A:$($sw2.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
+
+        # Build active keys for filtering
+        foreach ($active in $activeAssignments) {
+            $activeGroupKeys += "$($active.groupId):$($active.accessId)"
+        }
+
+        # Build eligible group objects
+        $sw3 = [System.Diagnostics.Stopwatch]::StartNew()
+        foreach ($schedule in $eligibleSchedules) {
+            $groupName = if ($schedule.group -and $schedule.group.displayName) { $schedule.group.displayName } else { $schedule.groupId }
+            $allEligibleGroups += [PSCustomObject]@{
+                GroupName   = $groupName
+                GroupId     = $schedule.groupId
+                AccessId    = $schedule.accessId
+                PrincipalId = $schedule.principalId
+                MaxDuration = $null  # Will be populated on-demand or in batch
+            }
+        }
+        $sw3.Stop()
+        Write-Host " [C:$($sw3.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray -NoNewline
+
+        $swTotal.Stop()
+        Write-Host " [T:$($swTotal.ElapsedMilliseconds)ms]" -ForegroundColor DarkGray
+    } catch {
+        Write-Host " Err: $($_.Exception.Message)" -ForegroundColor Red
+        $allEligibleGroups = @()
+    }
+
+    # Filter out active groups
+    $eligibleGroups = $allEligibleGroups | Where-Object {
+        $key = "$($_.GroupId):$($_.AccessId)"
+        $activeGroupKeys -notcontains $key
+    }
+
+    # Deduplicate by GroupId:AccessId (multiple eligibility schedules can exist for same group)
+    $seen = @{}
+    $deduplicatedGroups = @()
+    foreach ($group in $eligibleGroups) {
+        $key = "$($group.GroupId):$($group.AccessId)"
+        if (-not $seen.ContainsKey($key)) {
+            $seen[$key] = $true
+            $deduplicatedGroups += $group
+        }
+    }
+
+    return $deduplicatedGroups
+}
+
+function Get-ActiveGroupsOptimized {
+    param([string]$CurrentUserId)
+
+    $activeGroups = @()
+    try {
+        $uri = "https://graph.microsoft.com/v1.0/identityGovernance/privilegedAccess/group/assignmentScheduleInstances?`$filter=principalId eq '$CurrentUserId' and assignmentType eq 'Activated'&`$expand=group"
+        $response = Invoke-MgGraphRequest -Method GET -Uri $uri -ErrorAction Stop
+        $instances = if ($response -and $response.value) { $response.value } else { @() }
+
+        foreach ($instance in $instances) {
+            $groupName = if ($instance.group -and $instance.group.displayName) { $instance.group.displayName } else { $instance.groupId }
+
+            $expirationTime = $null
+            if ($instance.endDateTime) {
+                $expirationTime = [DateTime]::Parse($instance.endDateTime, [System.Globalization.CultureInfo]::InvariantCulture).ToLocalTime()
+            }
+
+            $activeGroups += [PSCustomObject]@{
+                GroupName = $groupName
+                Assignment = [PSCustomObject]@{
+                    Id          = $instance.id
+                    GroupId     = $instance.groupId
+                    AccessId    = $instance.accessId
+                    PrincipalId = $instance.principalId
+                    StartDateTime = $instance.startDateTime
+                    EndDateTime = $instance.endDateTime
+                }
+                ExpirationTime = $expirationTime
+            }
+        }
+    } catch {
+        $activeGroups = @()
+    }
+
+    return $activeGroups
+}
+
+function Submit-GroupActivation {
+    param(
+        [Parameter(Mandatory)]
+        [PSCustomObject]$EligibleGroup,
+        [Parameter(Mandatory)]
+        [string]$Justification,
+        [Parameter(Mandatory)]
+        [string]$Duration
+    )
+
+    try {
+        $body = @{
+            accessId    = $EligibleGroup.AccessId
+            principalId = $EligibleGroup.PrincipalId
+            groupId     = $EligibleGroup.GroupId
+            action      = "selfActivate"
+            justification = $Justification
+            scheduleInfo = @{
+                startDateTime = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ss.fffZ")
+                expiration = @{
+                    type     = "afterDuration"
+                    duration = $Duration
+                }
+            }
+        }
+
+        $uri = "https://graph.microsoft.com/v1.0/identityGovernance/privilegedAccess/group/assignmentScheduleRequests"
+        $result = Invoke-MgGraphRequest -Method POST -Uri $uri -Body $body -ContentType "application/json" -ErrorAction Stop
+
+        return @{ Success = $true; Status = $result.status; Error = $null; ClaimsChallenge = $null }
+    } catch {
+        $errorMsg = $_.Exception.Message
+        
+        # Try to get error details from Graph SDK
+        $fullError = $_ | Out-String
+        
+        # Graph SDK stores detailed error in ErrorRecord
+        if ($_.ErrorDetails -and $_.ErrorDetails.Message) {
+            try {
+                $errorJson = $_.ErrorDetails.Message | ConvertFrom-Json -ErrorAction SilentlyContinue
+                if ($errorJson.error.message) {
+                    $errorMsg = $errorJson.error.message
+                }
+            } catch { }
+        }
+        
+        # Also check exception data
+        if ($_.Exception -and $_.Exception.Data) {
+            foreach ($key in $_.Exception.Data.Keys) {
+                if ($key -eq 'ResponseBody' -or $key -eq 'Response') {
+                    try {
+                        $respBody = $_.Exception.Data[$key]
+                        if ($respBody) {
+                            $respJson = $respBody | ConvertFrom-Json -ErrorAction SilentlyContinue
+                            if ($respJson.error.message) {
+                                $errorMsg = $respJson.error.message
+                            }
+                        }
+                    } catch { }
+                }
+            }
+        }
+
+        # Check for Conditional Access claims challenge (step-up authentication required)
+        if ($errorMsg -like "*AcrsValidationFailed*" -or $errorMsg -like "*&claims=*" -or $fullError -like "*&claims=*") {
+            $claimsMatch = [regex]::Match($fullError, '&claims=([^&\s\]]+)')
+            if ($claimsMatch.Success) {
+                $encodedClaims = $claimsMatch.Groups[1].Value
+                $decodedClaims = [System.Web.HttpUtility]::UrlDecode($encodedClaims)
+                
+                # Extract only the valid claims JSON (stops at the closing brace for access_token)
+                # Claims format: {"access_token":{"acrs":{"essential":true,"value":"c4"}}}
+                if ($decodedClaims -match '(\{"access_token":\{"acrs":\{[^}]+\}\}\})') {
+                    $decodedClaims = $matches[1]
+                }
+                
+                return @{ Success = $false; Status = "ClaimsChallenge"; Error = $errorMsg; ClaimsChallenge = $decodedClaims }
+            }
+        }
+
+        if ($errorMsg -match "already exists" -or $errorMsg -match "RoleAssignmentExists") {
+            $errorMsg = "Already active"
+        }
+        # Check for policy validation failures
+        if ($errorMsg -match "ExpirationRule") {
+            $errorMsg = "Duration exceeds policy maximum"
+        }
+        if ($errorMsg -match "JustificationRule") {
+            $errorMsg = "Justification required or invalid"
+        }
+        if ($errorMsg -match "TicketingRule") {
+            $errorMsg = "Ticket number required"
+        }
+        if ($errorMsg -match "PendingRoleAssignmentRequest") {
+            $errorMsg = "Already has pending approval request"
+        }
+        return @{ Success = $false; Status = "Failed"; Error = $errorMsg; ClaimsChallenge = $null }
+    }
+}
+
+function Submit-GroupDeactivation {
+    param(
+        [Parameter(Mandatory)]
+        [PSCustomObject]$ActiveGroup
+    )
+
+    try {
+        $body = @{
+            accessId    = $ActiveGroup.Assignment.AccessId
+            principalId = $ActiveGroup.Assignment.PrincipalId
+            groupId     = $ActiveGroup.Assignment.GroupId
+            action      = "selfDeactivate"
+        }
+
+        $uri = "https://graph.microsoft.com/v1.0/identityGovernance/privilegedAccess/group/assignmentScheduleRequests"
+        $result = Invoke-MgGraphRequest -Method POST -Uri $uri -Body $body -ContentType "application/json" -ErrorAction Stop
+
+        return @{ Success = $true; Error = $null }
+    } catch {
+        $errorMsg = $_.Exception.Message
+        if ($errorMsg -match "does not exist|not found") {
+            $errorMsg = "Group membership already deactivated"
+        }
+        return @{ Success = $false; Error = $errorMsg }
+    }
+}
+
+function Show-GroupsDeactivationCountdown {
+    param([array]$TooNewGroups)
+
+    try {
+        [Console]::CursorVisible = $false
+
+        Clear-Host
+        Show-GroupsPIMHeader
+        Write-Host ""
+        Write-Host "⏰ Time Remaining Until Groups Can Be Deactivated" -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "   (5-minute minimum activation period required)" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "   The deactivation menu will automatically refresh when timers expire" -ForegroundColor Cyan
+        Write-Host ""
+
+        # Remember the starting line for groups
+        $groupStartLine = [Console]::CursorTop
+
+        # Deduplicate groups by name
+        $uniqueGroups = @{}
+        $deduplicatedGroups = @()
+        foreach ($groupInfo in $TooNewGroups) {
+            if (-not $uniqueGroups.ContainsKey($groupInfo.GroupName)) {
+                $uniqueGroups[$groupInfo.GroupName] = $true
+                $deduplicatedGroups += $groupInfo
+            }
+        }
+
+        # Show initial group lines
+        foreach ($groupInfo in $deduplicatedGroups) {
+            Write-Host "  ⏳ $($groupInfo.GroupName): --:-- remaining" -ForegroundColor Cyan
+        }
+        Write-Host ""
+        Write-Host "  ← Back" -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
+
+        do {
+            $allReady = $true
+
+            # Update each group's countdown in place
+            for ($i = 0; $i -lt $deduplicatedGroups.Count; $i++) {
+                $groupInfo = $deduplicatedGroups[$i]
+                try {
+                    $activationTime = $groupInfo.ActivationTime
+                    $deactivationTime = $activationTime.AddMinutes(5)
+                    $timeRemaining = $deactivationTime - (Get-Date)
+
+                    # Position cursor at this group's line
+                    $lineNumber = $groupStartLine + $i
+                    [Console]::SetCursorPosition(0, $lineNumber)
+
+                    if ($timeRemaining.TotalSeconds -gt 0) {
+                        $allReady = $false
+                        $minutes = [int][math]::Floor($timeRemaining.TotalMinutes)
+                        $seconds = [int][math]::Floor($timeRemaining.TotalSeconds % 60)
+                        $timeDisplay = "{0:D2}:{1:D2}" -f $minutes, $seconds
+
+                        Write-Host "  ⏳ $($groupInfo.GroupName): $timeDisplay remaining" -ForegroundColor Cyan -NoNewline
+                        Write-Host (" " * ([Console]::WindowWidth - [Console]::CursorLeft - 1))
+                    } else {
+                        Write-Host "  ✅ $($groupInfo.GroupName): Ready for deactivation!" -ForegroundColor Green -NoNewline
+                        Write-Host (" " * ([Console]::WindowWidth - [Console]::CursorLeft - 1))
+                    }
+                } catch {
+                    $lineNumber = $groupStartLine + $i
+                    [Console]::SetCursorPosition(0, $lineNumber)
+                    Write-Host (" " * ([Console]::WindowWidth - 1)) -NoNewline
+                    [Console]::SetCursorPosition(0, $lineNumber)
+                    Write-Host "  ❓ $($groupInfo.GroupName): Unable to check" -ForegroundColor Yellow
+                }
+            }
+
+            # Check if user pressed a key
+            if ([Console]::KeyAvailable) {
+                $key = [Console]::ReadKey($true)
+                if (Test-QuitShortcut -Key $key) {
+                    Invoke-GroupsPIMExit
+                } else {
+                    # Any other key = go back
+                    return "BACK"
+                }
+            }
+
+            if (-not $allReady) {
+                Start-Sleep -Seconds 1
+            }
+
+        } while (-not $allReady)
+
+        [Console]::CursorVisible = $false
+        return $true
+    } catch {
+        Write-Host "Error in countdown: $($_.Exception.Message)" -ForegroundColor Red
+        return $false
+    }
+}
+
+function Show-GroupsDynamicExpirationMenu {
+    param(
+        [array]$GroupExpirationData,
+        [string]$Title
+    )
+
+    [Console]::CursorVisible = $false
+    $currentIndex = 0
+    $selected = @()
+    for ($i = 0; $i -lt $GroupExpirationData.Count; $i++) {
+        $selected += $false
+    }
+
+    try {
+        do {
+            Clear-Host
+            Show-GroupsPIMHeader
+            Write-Host ""
+            Write-Host $Title -ForegroundColor Cyan
+            Write-Host ""
+
+            # Filter out expired groups and check if any remain
+            $activeGroupData = @()
+            $activeSelected = @()
+
+            for ($i = 0; $i -lt $GroupExpirationData.Count; $i++) {
+                $groupData = $GroupExpirationData[$i]
+                $expirationTime = $groupData.ExpirationTime
+
+                # Calculate countdown
+                $isExpired = $false
+                if ($expirationTime) {
+                    $timeRemaining = $expirationTime - (Get-Date)
+
+                    if ($timeRemaining.TotalSeconds -gt 0) {
+                        $hours = [Math]::Floor($timeRemaining.TotalHours)
+                        $minutes = $timeRemaining.Minutes
+                        $seconds = $timeRemaining.Seconds
+
+                        if ($hours -gt 0) {
+                            $countdownText = "expires in ${hours}h ${minutes}m ${seconds}s"
+                        } else {
+                            $countdownText = "expires in ${minutes}m ${seconds}s"
+                        }
+                    } else {
+                        $countdownText = "expired"
+                        $isExpired = $true
+                    }
+                } else {
+                    $countdownText = "no expiration data"
+                }
+
+                # Only include non-expired groups
+                if (-not $isExpired) {
+                    $activeGroupData += @{
+                        DisplayName    = $groupData.DisplayName
+                        ExpirationTime = $expirationTime
+                        CountdownText  = $countdownText
+                        OriginalIndex  = $i
+                    }
+                    $activeSelected += $selected[$i]
+                }
+            }
+
+            # Check if all groups expired
+            if ($activeGroupData.Count -eq 0) {
+                Write-Host "ℹ️  All group memberships have expired." -ForegroundColor Gray
+                Write-Host ""
+                Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
+                do {
+                    $key = [Console]::ReadKey($true)
+                    if (Test-QuitShortcut -Key $key) { Invoke-GroupsPIMExit }
+                } while ($true)
+            }
+
+            # Update arrays to only include active groups
+            $selected = $activeSelected
+
+            # Calculate total display items (groups + back item)
+            $backIndex = $activeGroupData.Count
+            $totalDisplayItems = $activeGroupData.Count + 1
+
+            if ($currentIndex -ge $totalDisplayItems) {
+                $currentIndex = $totalDisplayItems - 1
+            }
+
+            # Display active groups with dynamic countdown
+            for ($i = 0; $i -lt $activeGroupData.Count; $i++) {
+                $groupInfo = $activeGroupData[$i]
+
+                $checkbox = if ($selected[$i]) { "[✓]" } else { "[ ]" }
+                $arrow = if ($i -eq $currentIndex) { "► " } else { "  " }
+
+                Write-Host "$arrow$checkbox $($groupInfo.DisplayName) ($($groupInfo.CountdownText))" -ForegroundColor $(if ($i -eq $currentIndex) { "Yellow" } else { "White" })
+            }
+
+            # Show Back item
+            $backArrow = if ($currentIndex -eq $backIndex) { "► " } else { "  " }
+            $backColor = if ($currentIndex -eq $backIndex) { "Yellow" } else { "Gray" }
+            Write-Host "$backArrow← Back" -ForegroundColor $backColor
+
+            Write-Host ""
+            $selectedCount = ($selected | Where-Object { $_ }).Count
+            Write-Host "Groups Selected: $selectedCount" -ForegroundColor Green
+            Write-Host ""
+            Write-Host "↑/↓ Navigate | SPACE Toggle | Ctrl+A Select All | ENTER Confirm | $(Get-HelpShortcutText) | $(Get-QuitShortcutText)" -ForegroundColor Magenta
+
+            # Handle input with timeout for countdown updates
+            $inputAvailable = $false
+            $timeout = 1000
+            $startTime = Get-Date
+
+            while (((Get-Date) - $startTime).TotalMilliseconds -lt $timeout -and -not $inputAvailable) {
+                if ([Console]::KeyAvailable) {
+                    $inputAvailable = $true
+                    break
+                }
+                Start-Sleep -Milliseconds 50
+            }
+
+            if ($inputAvailable) {
+                $key = [Console]::ReadKey($true)
+
+                switch ($key.Key) {
+                    "UpArrow" {
+                        if ($currentIndex -gt 0) { $currentIndex-- } else { $currentIndex = $totalDisplayItems - 1 }
+                    }
+                    "DownArrow" {
+                        if ($currentIndex -lt ($totalDisplayItems - 1)) { $currentIndex++ } else { $currentIndex = 0 }
+                    }
+                    "Spacebar" {
+                        if ($currentIndex -eq $backIndex) {
+                            return "BACK"
+                        }
+                        $selected[$currentIndex] = -not $selected[$currentIndex]
+                    }
+                    "Enter" {
+                        if ($currentIndex -eq $backIndex) {
+                            return "BACK"
+                        }
+                        $selectedIndices = @()
+                        for ($i = 0; $i -lt $selected.Count; $i++) {
+                            if ($selected[$i]) {
+                                $selectedIndices += $i
+                            }
+                        }
+                        Clear-Host
+                        return $selectedIndices
+                    }
+                    "Escape" {
+                        return "BACK"
+                    }
+                }
+
+                # Handle Ctrl+A to select/deselect all
+                if ($key.Modifiers -eq "Control" -and $key.Key -eq "A") {
+                    $allSelected = ($selected | Where-Object { $_ -eq $true }).Count -eq $selected.Count
+                    for ($i = 0; $i -lt $selected.Count; $i++) {
+                        $selected[$i] = -not $allSelected
+                    }
+                }
+
+                # Handle Ctrl+H for help menu
+                if ($key.Modifiers -eq "Control" -and $key.Key -eq "H") {
+                    Show-HelpMenu
+                }
+
+                # Handle Ctrl+Q
+                if (Test-QuitShortcut -Key $key) {
+                    Invoke-GroupsPIMExit
+                }
+            }
+
+        } while ($true)
+    }
+    finally {
+        # Keep cursor hidden - calling code manages visibility
+    }
+}
+
+function Start-GroupActivationWorkflow {
+    param(
+        [array]$EligibleGroups,
+        [string]$CurrentUserId
+    )
+
+    if ($EligibleGroups.Count -eq 0) {
+        Clear-Host
+        Show-GroupsPIMHeader
+        Write-Host ""
+        Write-Host "❌ No eligible groups available for activation." -ForegroundColor Red
+        Write-Host ""
+
+        # Check if there are active groups to offer deactivation
+        $activeGroups = Get-ActiveGroupsOptimized -CurrentUserId $CurrentUserId
+        if ($activeGroups.Count -gt 0) {
+            Write-Host "Would you like to deactivate groups instead? (Y/N): " -NoNewline -ForegroundColor Cyan
+
+            [Console]::CursorVisible = $true
+
+            $promptLeft = [Console]::CursorLeft
+            $promptTop = [Console]::CursorTop
+
+            Write-Host "`n"
+            Write-Host "Y/N to choose | $(Get-QuitShortcutText)" -ForegroundColor Magenta
+
+            [Console]::SetCursorPosition($promptLeft, $promptTop)
+
+            $userInput = ""
+            do {
+                $key = [Console]::ReadKey($true)
+
+                if (Test-QuitShortcut -Key $key) {
+                    Invoke-GroupsPIMExit
+                    return
+                }
+
+                if ($key.Key -eq 'Enter') {
+                    if ($userInput -eq 'Y') {
+                        Start-GroupDeactivationWorkflow -ActiveGroups $activeGroups -CurrentUserId $CurrentUserId
+                        return
+                    } elseif ($userInput -eq 'N') {
+                        Clear-Host
+                        Show-GroupsPIMHeader
+                        Write-Host ""
+                        Write-Host "❌ No group management workflows available." -ForegroundColor Yellow
+                        Write-Host ""
+                        Write-Host "Check back later when groups are approved or activated." -ForegroundColor Gray
+                        Write-Host ""
+                        Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
+
+                        [Console]::CursorVisible = $false
+                        do {
+                            $k = [Console]::ReadKey($true)
+                            if (Test-QuitShortcut -Key $k) {
+                                Invoke-GroupsPIMExit
+                            }
+                        } while ($true)
+                        return
+                    } else {
+                        Write-Host ""
+                        Write-Host "Please enter Y or N: " -NoNewline -ForegroundColor Yellow
+                        $promptLeft = [Console]::CursorLeft
+                        $promptTop = [Console]::CursorTop
+                        Write-Host "`n"
+                        Write-Host "Y/N to choose | $(Get-QuitShortcutText)" -ForegroundColor Magenta
+                        [Console]::SetCursorPosition($promptLeft, $promptTop)
+                        $userInput = ""
+                    }
+                }
+                elseif ($key.Key -eq 'Backspace' -and $userInput.Length -gt 0) {
+                    $userInput = $userInput.Substring(0, $userInput.Length - 1)
+                    Write-Host "`b `b" -NoNewline
+                }
+                elseif ($key.KeyChar -match '[YyNn]' -and $userInput.Length -eq 0) {
+                    $userInput = $key.KeyChar.ToString().ToUpper()
+                    Write-Host $userInput -NoNewline -ForegroundColor Green
+                }
+            } while ($true)
+        } else {
+            Write-Host "❌ No group management workflows available." -ForegroundColor Yellow
+            Write-Host ""
+            Write-Host "Check back later when groups are approved or activated." -ForegroundColor Gray
+            Write-Host ""
+            Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
+
+            do {
+                $key = [Console]::ReadKey($true)
+                if (Test-QuitShortcut -Key $key) {
+                    Invoke-GroupsPIMExit
+                }
+            } while ($true)
+        }
+        return
+    }
+
+    # Fetch max durations for all eligible groups before showing selection
+    Write-Host "📋 Loading policy limits..." -ForegroundColor Gray
+    $groupMaxDurations = @{}
+    foreach ($group in $EligibleGroups) {
+        $maxDur = Get-GroupPolicyMaxDuration -GroupId $group.GroupId -AccessId $group.AccessId
+        $groupMaxDurations[$group.GroupId] = $maxDur
+    }
+
+    # Sort groups by max duration (ascending) so similar limits are grouped together
+    $EligibleGroups = $EligibleGroups | Sort-Object {
+        Convert-ISO8601ToMinutes -Duration $groupMaxDurations[$_.GroupId]
+    }
+
+    # Build group items for display with max duration
+    $groupItems = @()
+    foreach ($group in $EligibleGroups) {
+        $maxDur = $groupMaxDurations[$group.GroupId]
+        $friendlyMax = Convert-ISO8601ToFriendly -Duration $maxDur
+        $groupItems += "$($group.GroupName) (max: $friendlyMax)"
+    }
+
+    # Show checkbox menu for group selection with back option
+    $selectedIndices = Show-CheckboxMenu -Items $groupItems -Title "Select Groups to Activate" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -ShowBack -HeaderStyle "Groups"
+
+    if ($selectedIndices -eq "BACK") {
+        return
+    }
+
+    if ($null -eq $selectedIndices -or $selectedIndices.Count -eq 0) {
+        return
+    }
+
+    # Get selected groups
+    $groupsToActivate = @()
+    foreach ($idx in $selectedIndices) {
+        $groupsToActivate += $EligibleGroups[$idx]
+    }
+
+    # Clear and show header for activation wizard
+    Clear-Host
+    Show-GroupsPIMHeader
+    Write-Host ""
+
+    # Duration input - same as Entra/Azure workflow
+    do {
+        $durationInput = Read-PIMInput -Prompt "Enter activation duration (e.g., 1H, 30M, 2H30M)" -ControlsText $script:ControlMessages['Input']
+
+        if ([string]::IsNullOrWhiteSpace($durationInput) -or $durationInput -notmatch '^\d+[HM]') {
+            Write-Host "ERROR: Invalid format. Use '1H', '30M', or '2H30M'." -ForegroundColor Red
+        }
+    } while ([string]::IsNullOrWhiteSpace($durationInput) -or $durationInput -notmatch '^\d+[HM]')
+
+    # Convert duration to ISO 8601 format
+    $duration = $durationInput.ToUpper() -replace '(\d+)H', 'PT${1}H' -replace '(\d+)M', '${1}M'
+    if ($duration -match '^\d+M$') { $duration = "PT$duration" }
+
+    # Parse duration to check if it's less than 5 minutes
+    $totalMinutes = 0
+    if ($durationInput.ToUpper() -match '(\d+)H') { $totalMinutes += [int]$matches[1] * 60 }
+    if ($durationInput.ToUpper() -match '(\d+)M') { $totalMinutes += [int]$matches[1] }
+
+    if ($totalMinutes -lt 5) {
+        Write-Host ""
+        Write-Host "❌ Activation Duration too short: Minimum Required is 5 minutes." -ForegroundColor Red
+        Write-Host ""
+        Write-Host "Press any key to continue..." -ForegroundColor Yellow
+        $null = [Console]::ReadKey($true)
+        return
+    }
+
+    # Check for policy conflicts and show preview
+    $groupsAtRequestedDuration = @()
+    $groupsCapped = @()
+    
+    foreach ($group in $groupsToActivate) {
+        $maxDuration = $groupMaxDurations[$group.GroupId]
+        $maxMinutes = Convert-ISO8601ToMinutes -Duration $maxDuration
+        
+        if ($totalMinutes -le $maxMinutes) {
+            $groupsAtRequestedDuration += $group
+        } else {
+            $groupsCapped += [PSCustomObject]@{
+                Group = $group
+                MaxDuration = $maxDuration
+                MaxMinutes = $maxMinutes
+            }
+        }
+    }
+
+    # If any groups will be capped, show preview and ask for confirmation
+    if ($groupsCapped.Count -gt 0) {
+        Clear-Host
+        Show-GroupsPIMHeader
+        Write-Host ""
+        Write-Host "📋 Activation Preview" -ForegroundColor Cyan
+        Write-Host "─────────────────────" -ForegroundColor DarkGray
+        Write-Host ""
+
+        if ($groupsAtRequestedDuration.Count -gt 0) {
+            Write-Host "✅ Will activate for $durationInput ($($groupsAtRequestedDuration.Count) group$(if($groupsAtRequestedDuration.Count -ne 1){'s'})):" -ForegroundColor Green
+            foreach ($g in $groupsAtRequestedDuration) {
+                Write-Host "   • $($g.GroupName)" -ForegroundColor White
+            }
+            Write-Host ""
+        }
+
+        Write-Host "⚠️  Policy limits exceeded - will use max allowed ($($groupsCapped.Count) group$(if($groupsCapped.Count -ne 1){'s'})):" -ForegroundColor Yellow
+        foreach ($capped in $groupsCapped) {
+            $friendlyMax = Convert-ISO8601ToFriendly -Duration $capped.MaxDuration
+            # Convert to plain English
+            $plainEnglish = ""
+            if ($capped.MaxMinutes -ge 60) {
+                $hours = [math]::Floor($capped.MaxMinutes / 60)
+                $mins = $capped.MaxMinutes % 60
+                if ($mins -gt 0) {
+                    $plainEnglish = "$hours hour$(if($hours -ne 1){'s'}) $mins minute$(if($mins -ne 1){'s'})"
+                } else {
+                    $plainEnglish = "$hours hour$(if($hours -ne 1){'s'})"
+                }
+            } else {
+                $plainEnglish = "$($capped.MaxMinutes) minute$(if($capped.MaxMinutes -ne 1){'s'})"
+            }
+            Write-Host "   • $($capped.Group.GroupName) → " -ForegroundColor White -NoNewline
+            Write-Host "$plainEnglish" -ForegroundColor Cyan -NoNewline
+            Write-Host " (policy max)" -ForegroundColor DarkGray
+        }
+
+        Write-Host ""
+        Write-Host "Press " -ForegroundColor Gray -NoNewline
+        Write-Host "ENTER" -ForegroundColor Green -NoNewline
+        Write-Host " to proceed, " -ForegroundColor Gray -NoNewline
+        Write-Host "ESC" -ForegroundColor Yellow -NoNewline
+        Write-Host " to go back and adjust." -ForegroundColor Gray
+
+        do {
+            $key = [Console]::ReadKey($true)
+            if ($key.Key -eq 'Escape') {
+                return
+            }
+            if ($key.Key -eq 'Enter') {
+                break
+            }
+        } while ($true)
+
+        Write-Host ""
+    }
+
+    # Justification input
+    $justification = Read-PIMInput -Prompt "Enter reason for activation" -ControlsText $script:ControlMessages['Input']
+
+    if ([string]::IsNullOrWhiteSpace($justification)) {
+        Write-Host "Justification is required." -ForegroundColor Red
+        return
+    }
+
+    Write-Host "🔄 Activating $($groupsToActivate.Count) group(s)..." -ForegroundColor Cyan
+    Write-Host ""
+
+    $successCount = 0
+    $failCount = 0
+    $requestedMinutes = $totalMinutes
+
+    foreach ($group in $groupsToActivate) {
+        $groupName = $group.GroupName
+        $maxDuration = $groupMaxDurations[$group.GroupId]
+        $maxMinutes = Convert-ISO8601ToMinutes -Duration $maxDuration
+        
+        # Determine the actual duration to use (cap to policy max if needed)
+        $actualDuration = $duration
+        if ($requestedMinutes -gt $maxMinutes) {
+            $actualDuration = $maxDuration
+        }
+        
+        $result = Submit-GroupActivation -EligibleGroup $group -Justification $justification -Duration $actualDuration
+
+        if ($result.Success) {
+            if ($result.Status -eq "PendingApproval") {
+                Write-Host "⏳ Group activation submitted for: $groupName (pending approval)" -ForegroundColor Yellow
+            } else {
+                Write-Host "✅ Group activation submitted for: $groupName" -ForegroundColor Green
+            }
+            $successCount++
+        } elseif ($result.ClaimsChallenge) {
+            # Conditional Access requires step-up authentication (ACRS claim)
+            Write-Host "🔐 $groupName requires additional authentication (Conditional Access)..." -ForegroundColor Yellow
+
+            try {
+                # Get new token with claims challenge using Graph scopes
+                $scopes = @(
+                    'PrivilegedAssignmentSchedule.ReadWrite.AzureADGroup',
+                    'PrivilegedEligibilitySchedule.Read.AzureADGroup',
+                    'RoleManagementPolicy.Read.AzureADGroup'
+                )
+                $newToken = Get-BrowserAccessTokenWithClaims -Scopes $scopes -Claims $result.ClaimsChallenge
+
+                if ($newToken) {
+                    # Reconnect to Graph with new token
+                    $secureToken = ConvertTo-SecureString $newToken -AsPlainText -Force
+                    Connect-MgGraph -AccessToken $secureToken -NoWelcome -ErrorAction Stop
+
+                    # Retry the activation request
+                    $retryResult = Submit-GroupActivation -EligibleGroup $group -Justification $justification -Duration $actualDuration
+                    if ($retryResult.Success) {
+                        if ($retryResult.Status -eq "PendingApproval") {
+                            Write-Host "⏳ Group activation submitted for: $groupName (pending approval)" -ForegroundColor Yellow
+                        } else {
+                            Write-Host "✅ Group activation submitted for: $groupName" -ForegroundColor Green
+                        }
+                        $successCount++
+                    } else {
+                        Write-Host "❌ Failed to activate: $groupName - $($retryResult.Error)" -ForegroundColor Red
+                        $failCount++
+                    }
+                } else {
+                    Write-Host "❌ Failed to activate: $groupName - Step-up authentication failed" -ForegroundColor Red
+                    $failCount++
+                }
+            } catch {
+                Write-Host "❌ Failed to activate: $groupName - $($_.Exception.Message)" -ForegroundColor Red
+                $failCount++
+            }
+        } else {
+            Write-Host "❌ Failed to activate: $groupName - $($result.Error)" -ForegroundColor Red
+            $failCount++
+        }
+    }
+
+    Write-Host ""
+    # Show summary
+    if ($successCount -gt 0 -and $failCount -eq 0) {
+        Write-Host "✅ Total Groups activated: $successCount" -ForegroundColor Green
+    } elseif ($successCount -gt 0 -and $failCount -gt 0) {
+        Write-Host "⚠️ Groups Summary: $successCount activated, $failCount failed" -ForegroundColor Yellow
+    } elseif ($failCount -gt 0 -and $successCount -eq 0) {
+        Write-Host "❌ Groups Summary: $failCount failed" -ForegroundColor Red
+    }
+
+    Write-Host ""
+
+    # Ask if user wants to manage more groups
+    do {
+        [Console]::CursorVisible = $true
+        $userInput = Read-PIMInput -Prompt "Would you like to manage more groups? (Y/N)" -ControlsText $script:ControlMessages['Exit']
+        if (-not $userInput) { continue }
+        $userInput = $userInput.Trim().ToUpper()
+        if ($userInput -eq "Y" -or $userInput -eq "YES") {
+            $continueChoice = "Yes"
+            break
+        } elseif ($userInput -eq "N" -or $userInput -eq "NO") {
+            $continueChoice = "No"
+            break
+        } else {
+            Write-Host "Please enter Y or N." -ForegroundColor Yellow
+        }
+    } while ($true)
+
+    if ($continueChoice -eq "Yes") {
+        return
+    } else {
+        Write-Host "❌ No group management workflows available." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Check back later when groups are approved or activated." -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
+
+        [Console]::CursorVisible = $false
+        do {
+            $key = [Console]::ReadKey($true)
+            if (Test-QuitShortcut -Key $key) {
+                Invoke-GroupsPIMExit
+            }
+        } while ($true)
+    }
+}
+
+function Start-GroupDeactivationWorkflow {
+    param(
+        [array]$ActiveGroups,
+        [string]$CurrentUserId
+    )
+
+    [Console]::CursorVisible = $false
+    if ($ActiveGroups.Count -eq 0) {
+        Write-Host ""
+        Write-Host "ℹ️  No active groups to deactivate at this time." -ForegroundColor Gray
+        Write-Host ""
+
+        $response = Read-PIMInput -Prompt "Would you like to activate groups instead? (Y/N)" -ForegroundColor Cyan
+
+        if ($response) {
+            $userInput = $response.Trim().ToUpper()
+            if ($userInput -eq "Y" -or $userInput -eq "YES") {
+                Clear-Host
+                Show-GroupsPIMHeader
+                Write-Host ""
+                Write-Host "🔄 Loading eligible groups..." -ForegroundColor Cyan -NoNewline
+                $eligibleGroups = Get-EligibleGroupsOptimized -CurrentUserId $CurrentUserId
+                if ($eligibleGroups.Count -gt 0) {
+                    Write-Host " ✅ $($eligibleGroups.Count) found" -ForegroundColor Green
+                    Start-GroupActivationWorkflow -EligibleGroups $eligibleGroups -CurrentUserId $CurrentUserId
+                } else {
+                    Write-Host ""
+                    Write-Host ""
+                    Write-Host "❌ No eligible groups available for activation." -ForegroundColor Red
+                }
+                return
+            }
+        }
+
+        # User hit N or gave no response — no workflows available
+        Write-Host ""
+        Write-Host "❌ No group management workflows available." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Check back later when groups are approved or activated." -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
+
+        [Console]::CursorVisible = $false
+        do {
+            $key = [Console]::ReadKey($true)
+            if (Test-QuitShortcut -Key $key) {
+                Invoke-GroupsPIMExit
+            }
+        } while ($true)
+        return
+    }
+
+    # Check for groups that are too new to deactivate (5-minute rule)
+    $readyToDeactivate = @()
+    $tooNewGroups = @()
+
+    foreach ($group in $ActiveGroups) {
+        try {
+            $assignment = $group.Assignment
+            if ($assignment.StartDateTime) {
+                $activationTime = [DateTime]::Parse($assignment.StartDateTime, [System.Globalization.CultureInfo]::InvariantCulture).ToLocalTime()
+                $timeSinceActivation = (Get-Date) - $activationTime
+
+                if ($timeSinceActivation.TotalMinutes -lt 5) {
+                    $tooNewGroups += [PSCustomObject]@{
+                        GroupName      = $group.GroupName
+                        ActivationTime = $activationTime
+                        Group          = $group
+                    }
+                } else {
+                    $readyToDeactivate += $group
+                }
+            } else {
+                $readyToDeactivate += $group
+            }
+        } catch {
+            $readyToDeactivate += $group
+        }
+    }
+
+    # If some groups are too new, show countdown
+    if ($tooNewGroups.Count -gt 0) {
+        [Console]::CursorVisible = $false
+        Clear-Host
+        Show-GroupsPIMHeader
+        Write-Host ""
+
+        if ($readyToDeactivate.Count -eq 0) {
+            Write-Host "⏰ All groups are within the 5-minute activation period." -ForegroundColor Yellow
+        } else {
+            Write-Host "⏰ Some groups are within the 5-minute activation period." -ForegroundColor Yellow
+        }
+        Write-Host "Showing countdown until they can be deactivated..." -ForegroundColor Cyan
+        Write-Host ""
+
+        $countdownResult = Show-GroupsDeactivationCountdown -TooNewGroups $tooNewGroups
+
+        if ($countdownResult -eq $true) {
+            Start-GroupDeactivationWorkflow -ActiveGroups $ActiveGroups -CurrentUserId $CurrentUserId
+        }
+        return
+    }
+
+    # Build group expiration data for dynamic countdown menu
+    $groupExpirationData = @()
+    foreach ($group in $readyToDeactivate) {
+        $groupExpirationData += [PSCustomObject]@{
+            DisplayName    = $group.GroupName
+            ExpirationTime = $group.ExpirationTime
+        }
+    }
+
+    # Show dynamic countdown menu with live expiration timers and back option
+    $selectedIndices = Show-GroupsDynamicExpirationMenu -GroupExpirationData $groupExpirationData -Title "🔄 Select Groups to Deactivate"
+
+    if ($selectedIndices -eq "BACK") {
+        return
+    }
+
+    if ($null -eq $selectedIndices -or $selectedIndices.Count -eq 0) {
+        return
+    }
+
+    # Get selected groups
+    $groupsToDeactivate = @()
+    foreach ($idx in $selectedIndices) {
+        $groupsToDeactivate += $readyToDeactivate[$idx]
+    }
+
+    # Deactivate groups
+    Clear-Host
+    Show-GroupsPIMHeader
+    Write-Host ""
+    Write-Host "🔄 Deactivating $($groupsToDeactivate.Count) group(s)..." -ForegroundColor Cyan
+    Write-Host ""
+
+    $successCount = 0
+    $failCount = 0
+
+    foreach ($group in $groupsToDeactivate) {
+        $groupName = $group.GroupName
+        $result = Submit-GroupDeactivation -ActiveGroup $group
+        if ($result.Success) {
+            Write-Host "✅ Successfully deactivated: $groupName" -ForegroundColor Green
+            $successCount++
+        } else {
+            Write-Host "❌ Failed to deactivate: $groupName - $($result.Error)" -ForegroundColor Red
+            $failCount++
+        }
+    }
+
+    Write-Host ""
+    # Show summary
+    if ($successCount -gt 0 -and $failCount -eq 0) {
+        Write-Host "✅ Total Groups deactivated: $successCount" -ForegroundColor Green
+    } elseif ($successCount -gt 0 -and $failCount -gt 0) {
+        Write-Host "⚠️ Groups Summary: $successCount deactivated, $failCount failed" -ForegroundColor Yellow
+    } elseif ($failCount -gt 0 -and $successCount -eq 0) {
+        Write-Host "❌ Groups Summary: $failCount failed" -ForegroundColor Red
+    }
+
+    Write-Host ""
+
+    # Ask if user wants to manage more groups
+    do {
+        [Console]::CursorVisible = $true
+        $userInput = Read-PIMInput -Prompt "Would you like to manage more groups? (Y/N)" -ControlsText $script:ControlMessages['Exit']
+        if (-not $userInput) { continue }
+        $userInput = $userInput.Trim().ToUpper()
+        if ($userInput -eq "Y" -or $userInput -eq "YES") {
+            $continueChoice = "Yes"
+            break
+        } elseif ($userInput -eq "N" -or $userInput -eq "NO") {
+            $continueChoice = "No"
+            break
+        } else {
+            Write-Host "Please enter Y or N." -ForegroundColor Yellow
+        }
+    } while ($true)
+
+    if ($continueChoice -eq "Yes") {
+        return
+    } else {
+        Write-Host "❌ No group management workflows available." -ForegroundColor Yellow
+        Write-Host ""
+        Write-Host "Check back later when groups are approved or activated." -ForegroundColor Gray
+        Write-Host ""
+        Write-Host "$(Get-QuitShortcutText)" -ForegroundColor Magenta
+
+        [Console]::CursorVisible = $false
+        do {
+            $key = [Console]::ReadKey($true)
+            if (Test-QuitShortcut -Key $key) {
+                Invoke-GroupsPIMExit
+            }
+        } while ($true)
+    }
+}
+
+function Start-GroupsPIMRoleManagement {
+    param(
+        [string]$CurrentUserId
+    )
+
+    do {
+        [Console]::CursorVisible = $false
+        Clear-Host
+        Show-GroupsPIMHeader
+
+        $menuItems = @(
+            "Activate Groups",
+            "Deactivate Groups"
+        )
+
+        $selectedIndices = Show-CheckboxMenu -Items $menuItems -Title "🔄 Choose Action" -Prompt "Use arrow keys to navigate, SPACE to toggle selection, ENTER to confirm:" -SingleSelection -ShowBack -HeaderStyle "Groups"
+
+        # Back returns to workflow selector
+        if ($selectedIndices -eq "BACK") {
+            return
+        }
+
+        if ($selectedIndices.Count -eq 0) {
+            return
+        }
+
+        $selectedIndex = $selectedIndices[0]
+        $selectedAction = $menuItems[$selectedIndex]
+
+        [Console]::CursorVisible = $false
+
+        if ($selectedAction -eq "Activate Groups") {
+            Clear-Host
+            Show-GroupsPIMHeader
+            Write-Host ""
+            Write-Host "🔄 Loading eligible groups..." -ForegroundColor Cyan -NoNewline
+            $eligibleGroups = Get-EligibleGroupsOptimized -CurrentUserId $CurrentUserId
+            if ($eligibleGroups.Count -gt 0) {
+                Write-Host " ✅ $($eligibleGroups.Count) found" -ForegroundColor Green
+            } else {
+                Write-Host ""
+                Write-Host ""
+            }
+            Start-GroupActivationWorkflow -EligibleGroups $eligibleGroups -CurrentUserId $CurrentUserId
+        } elseif ($selectedAction -eq "Deactivate Groups") {
+            Clear-Host
+            Show-GroupsPIMHeader
+            Write-Host ""
+            Write-Host "🔄 Loading active groups..." -ForegroundColor Cyan -NoNewline
+            $activeGroups = Get-ActiveGroupsOptimized -CurrentUserId $CurrentUserId
+            if ($activeGroups.Count -gt 0) {
+                Write-Host " ✅ $($activeGroups.Count) found" -ForegroundColor Green
+            } else {
+                Write-Host ""
+            }
+            Start-GroupDeactivationWorkflow -ActiveGroups $activeGroups -CurrentUserId $CurrentUserId
+        }
+    } while ($true)
+}
+
+function Start-GroupsPIMWorkflow {
+    $script:CurrentWorkflow = 'Groups'
+
+    # Pre-load MSAL and compile helper BEFORE Graph modules load their own MSAL
+    $msalInitialized = Initialize-MSALAssemblies
+    if ($msalInitialized) {
+        try {
+            $null = Initialize-MSALHelper
+        } catch {
+            Write-Host "MSAL Helper compile error: $($_.Exception.Message)" -ForegroundColor Red
+            $msalInitialized = $false
+        }
+    }
+
+    # Only need Microsoft.Graph.Authentication for REST calls via Invoke-MgGraphRequest
+    $requiredGraphModules = @(
+        "Microsoft.Graph.Authentication"
+    )
+
+    Clear-Host
+    Write-Host ""
+    Write-Host "[ P I M   G R O U P S ]" -ForegroundColor Magenta
+    Write-Host "    with PowerShell" -ForegroundColor DarkGray
+    Write-Host ""
+
+    Write-Host "Loading Microsoft Graph modules..." -ForegroundColor Cyan
+    Write-Host ""
+
+    $barWidth = 30
+    $currentModule = 0
+    $totalModules = $requiredGraphModules.Count
+
+    foreach ($module in $requiredGraphModules) {
+        $currentModule++
+        $percent = [math]::Floor(($currentModule / $totalModules) * 100)
+        $filled = [math]::Floor(($currentModule / $totalModules) * $barWidth)
+        $empty = $barWidth - $filled
+        $bar = "█" * $filled + "░" * $empty
+
+        Write-Host "  [$bar] $percent% " -NoNewline -ForegroundColor Yellow
+        Write-Host "Loading: " -NoNewline -ForegroundColor Gray
+        Write-Host "$module" -ForegroundColor White
+
+        Import-Module $module -Force -ErrorAction SilentlyContinue
+    }
+
+    Write-Host ""
+    Write-Host "  ✓ All modules ready!" -ForegroundColor Green
+    Write-Host ""
+
+    # Authenticate to Microsoft Graph with group-specific scopes
+    [Console]::CursorVisible = $false
+
+    try {
+        $scopes = @(
+            'PrivilegedAssignmentSchedule.ReadWrite.AzureADGroup',
+            'PrivilegedEligibilitySchedule.Read.AzureADGroup',
+            'RoleManagementPolicy.Read.AzureADGroup',
+            'User.Read'
+        )
+        $connected = Connect-MgGraphWithBrowser -Scopes $scopes
+
+        if (-not $connected) {
+            Write-Host "❌ Failed to connect to Microsoft Graph" -ForegroundColor Red
+            Write-Host "Press Enter to exit..." -ForegroundColor Yellow
+            Read-Host
+            return
+        }
+
+        Write-Host "✅ Successfully connected to Microsoft Graph" -ForegroundColor Green
+
+        $currentUser = Invoke-MgGraphRequest -Method GET -Uri "https://graph.microsoft.com/v1.0/me" -ErrorAction Stop
+        $currentUserId = $currentUser.id
+        Write-Host "✅ Current User ID: $currentUserId" -ForegroundColor Green
+    } catch {
+        Write-Host "❌ Failed to connect to Microsoft Graph: $($_.Exception.Message)" -ForegroundColor Red
+        Write-Host "Press Enter to continue..." -ForegroundColor Yellow
+        Read-Host
+        return
+    }
+
+    # Start the PIM group management workflow
+    [Console]::CursorVisible = $true
+    Start-GroupsPIMRoleManagement -CurrentUserId $currentUserId
+
+    # Cleanup
+    Disconnect-MgGraph -ErrorAction SilentlyContinue | Out-Null
+}
+
+# ========================= Entra PIM Workflow =========================
 
 function Start-EntraPIMWorkflow {
     $script:CurrentWorkflow = 'Entra'
@@ -5533,6 +7408,9 @@ do {
         }
         'Azure' {
             Start-AzurePIMWorkflow
+        }
+        'Groups' {
+            Start-GroupsPIMWorkflow
         }
         'Quit' {
             Invoke-GracefulExit -Reason "Exiting..."
