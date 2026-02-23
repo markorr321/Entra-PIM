@@ -6,7 +6,7 @@
     RootModule = 'Entra-PIM.psm1'
 
     # Version number of this module (SemVer format for PSResourceGet)
-    ModuleVersion = '2.3.0'
+    ModuleVersion = '2.3.1'
 
     # ID used to uniquely identify this module
     GUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
@@ -45,7 +45,7 @@
     PrivateData = @{
         PSData = @{
             # Tags applied to this module for discoverability in online galleries
-            Tags = @('Entra', 'PIM', 'Azure', 'Identity', 'Governance', 'MicrosoftGraph', 'Privileged', 'RoleManagement', 'AzureResources', 'CrossPlatform', 'macOS')
+            Tags = @('Entra', 'PIM', 'Azure', 'Identity', 'Governance', 'MicrosoftGraph', 'Privileged', 'RoleManagement', 'AzureResources', 'Groups', 'CrossPlatform', 'macOS')
 
             # A URL to the license for this module
             LicenseUri = 'https://github.com/markorr321/Entra-PIM/blob/main/LICENSE'
@@ -58,6 +58,16 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+## 2.3.1
+- Added Groups PIM support - activate/deactivate Entra group memberships (member and owner roles)
+- Policy duration display shows max allowed time for each group in selection menu
+- Activation preview when requested duration exceeds policy limits
+- Smart duration capping - each group activates for its individual policy maximum if exceeded
+- Fixed Ctrl+A select all in Azure role menus
+- Added branded HTML authentication success/error pages
+- Updated help documentation (Get-EntraPIMHelp) with Groups PIM permissions
+- Updated README with Groups PIM features and permissions
+
 ## 2.3.0
 - Added back navigation to all menus - select "← Back" to return to the previous screen
 - Live countdown timers on deactivation role selection (expiration updates every second)
