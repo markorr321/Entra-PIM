@@ -349,8 +349,7 @@ function Test-EntraPIMUpdate {
         Checks if a newer version of Entra-PIM is available on PowerShell Gallery.
 
     .DESCRIPTION
-        Performs a non-intrusive check for updates once per 24 hours.
-        Uses cached results to avoid excessive API calls.
+        Performs a quick check for updates on each run.
         Silently handles all errors to not interrupt user experience.
 
     .EXAMPLE
@@ -365,114 +364,61 @@ function Test-EntraPIMUpdate {
             return
         }
 
-        # Get current module version
-        $currentModule = Get-Module -Name Entra-PIM -ListAvailable |
+        # Get current module version (check loaded module first, then installed)
+        $currentModule = Get-Module -Name Entra-PIM |
             Sort-Object Version -Descending |
             Select-Object -First 1
 
         if (-not $currentModule) {
-            # Module not properly installed, skip check
+            $currentModule = Get-Module -Name Entra-PIM -ListAvailable |
+                Sort-Object Version -Descending |
+                Select-Object -First 1
+        }
+
+        if (-not $currentModule) {
             return
         }
 
         $currentVersion = $currentModule.Version
 
-        # Setup cache file path (cross-platform)
-        $tempPath = [System.IO.Path]::GetTempPath()
-        $cacheFile = Join-Path $tempPath "EntraPIM_UpdateCheck.json"
+        # Fast version check using URL redirect
+        try {
+            $url = "https://www.powershellgallery.com/packages/Entra-PIM"
+            $latestVersion = $null
 
-        # Check if we have valid cached data
-        $shouldCheck = $true
-        if (Test-Path $cacheFile) {
             try {
-                $cache = Get-Content $cacheFile -Raw -ErrorAction Stop | ConvertFrom-Json
-
-                # Validate cache structure
-                if ($cache.LastCheckTime -and $cache.LatestVersion -and $cache.CurrentVersion) {
-                    $lastCheck = [DateTime]::Parse($cache.LastCheckTime)
-                    $hoursSinceCheck = ((Get-Date) - $lastCheck).TotalHours
-
-                    # Use cache if less than 24 hours old
-                    if ($hoursSinceCheck -lt 24) {
-                        $shouldCheck = $false
-                        $latestVersion = [version]$cache.LatestVersion
-
-                        # Show notification if cached version indicates update available
-                        if ($currentVersion -lt $latestVersion) {
-                            Show-UpdateNotification -CurrentVersion $currentVersion -LatestVersion $latestVersion
-                        }
-                    }
-                }
+                $null = Invoke-WebRequest -Uri $url -UseBasicParsing -MaximumRedirection 0 -TimeoutSec 5 -ErrorAction Stop
             } catch {
-                # Cache corrupt or invalid - delete and proceed with check
-                Remove-Item $cacheFile -ErrorAction SilentlyContinue
-                $shouldCheck = $true
-            }
-        }
-
-        # Perform actual version check if needed
-        if ($shouldCheck) {
-            try {
-                # Fast method using URL redirect
-                $url = "https://www.powershellgallery.com/packages/Entra-PIM"
-                $latestVersion = $null
-
-                try {
-                    $null = Invoke-WebRequest -Uri $url -UseBasicParsing -MaximumRedirection 0 -TimeoutSec 5 -ErrorAction Stop
-                } catch {
-                    # When MaximumRedirection is 0, a redirect throws an exception
-                    # Extract version from the redirect Location header in the exception
-                    if ($_.Exception.Response -and $_.Exception.Response.Headers) {
-                        try {
-                            $location = $_.Exception.Response.Headers.GetValues('Location') | Select-Object -First 1
-                            if ($location) {
-                                $versionString = Split-Path -Path $location -Leaf
-                                $latestVersion = [version]$versionString
-                            } else {
-                                return
-                            }
-                        } catch {
-                            # Can't get location header - silently fail
+                if ($_.Exception.Response -and $_.Exception.Response.Headers) {
+                    try {
+                        $location = $_.Exception.Response.Headers.GetValues('Location') | Select-Object -First 1
+                        if ($location) {
+                            $versionString = Split-Path -Path $location -Leaf
+                            $latestVersion = [version]$versionString
+                        } else {
                             return
                         }
-                    } else {
-                        # Real error (not a redirect) - silently fail
+                    } catch {
                         return
                     }
-                }
-
-                if (-not $latestVersion) {
+                } else {
                     return
                 }
+            }
 
-                # Update cache
-                $cacheData = @{
-                    LastCheckTime = (Get-Date).ToString('o')  # ISO 8601 format
-                    LatestVersion = $latestVersion.ToString()
-                    CurrentVersion = $currentVersion.ToString()
-                }
-
-                try {
-                    $cacheData | ConvertTo-Json | Set-Content $cacheFile -ErrorAction Stop
-                } catch {
-                    # Can't write cache - not critical, continue anyway
-                }
-
-                # Show notification if update available
-                if ($currentVersion -lt $latestVersion) {
-                    Show-UpdateNotification -CurrentVersion $currentVersion -LatestVersion $latestVersion
-                }
-
-            } catch {
-                # Network error, API down, timeout, etc.
-                # Silently fail - don't interrupt user experience
+            if (-not $latestVersion) {
                 return
             }
+
+            if ($currentVersion -lt $latestVersion) {
+                Show-UpdateNotification -CurrentVersion $currentVersion -LatestVersion $latestVersion
+            }
+
+        } catch {
+            return
         }
 
     } catch {
-        # Any unexpected error - silently fail
-        # The update check feature should never break the module
         return
     }
 }
