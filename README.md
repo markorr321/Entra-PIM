@@ -55,7 +55,7 @@ Start-EntraPIM
 
 That's it! The tool will:
 1. Open your browser for authentication
-2. Let you choose between Entra ID or Azure Resource PIM
+2. Let you choose between Entra ID Roles, Entra Group Roles, or Azure Resource Roles
 3. Show your eligible/active PIM roles
 4. Let you activate or deactivate roles interactively
 
@@ -129,7 +129,9 @@ When using a custom app registration, configure it with:
 | ↑/↓ | Navigate |
 | SPACE | Toggle selection |
 | Ctrl+A | Select all |
+| Ctrl+D | Deselect all |
 | ENTER | Confirm |
+| ESC | Step back (activation form) |
 | Ctrl+H | Help |
 | Ctrl+Q | Exit |
 
@@ -183,6 +185,11 @@ The version check:
 - **Policy Duration Display**: Selection menu shows each group's maximum allowed duration
 - **Activation Preview**: When requested duration exceeds policy limits, preview shows which groups will be capped
 - **Smart Duration Capping**: Each group activates for its individual policy maximum if your request exceeds it
+- **Azure Browse All Roles**: New view mode to browse roles across all subscriptions or filter by subscription
+- **Branded Auth Pages**: Custom-styled success and error pages in the browser after authentication
+- **Deactivation Summaries**: Clear success/fail/skipped totals displayed after deactivation operations
+- **Ctrl+A Fix**: Select all now works correctly in Azure role menus
+- **Version Display**: Header now shows the current module version
 
 ### Previous Highlights
 
