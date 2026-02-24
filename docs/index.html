@@ -1,0 +1,626 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Entra PIM - PowerShell PIM Role Management</title>
+    <meta name="description" content="PowerShell module for managing Microsoft Entra PIM role activations. Supports Entra ID roles, Azure Resource roles, and Groups PIM.">
+    <style>
+        *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+        :root {
+            --bg-primary: #0d1117;
+            --bg-secondary: #161b22;
+            --bg-card: rgba(255, 255, 255, 0.05);
+            --bg-card-hover: rgba(255, 255, 255, 0.08);
+            --text-primary: #e6edf3;
+            --text-secondary: rgba(230, 237, 243, 0.7);
+            --text-muted: rgba(230, 237, 243, 0.4);
+            --accent-start: #667eea;
+            --accent-end: #764ba2;
+            --border: rgba(255, 255, 255, 0.08);
+            --code-bg: rgba(255, 255, 255, 0.06);
+        }
+
+        html { scroll-behavior: smooth; }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, sans-serif;
+            background: var(--bg-primary);
+            color: var(--text-primary);
+            line-height: 1.6;
+            overflow-x: hidden;
+        }
+
+        a { color: var(--accent-start); text-decoration: none; }
+        a:hover { text-decoration: underline; }
+
+        /* ─── Hero ─── */
+        .hero {
+            min-height: 90vh;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            text-align: center;
+            padding: 2rem;
+            position: relative;
+            overflow: hidden;
+        }
+
+        .hero::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            background: radial-gradient(ellipse at 50% 0%, rgba(102, 126, 234, 0.15) 0%, transparent 60%),
+                        radial-gradient(ellipse at 80% 50%, rgba(118, 75, 162, 0.1) 0%, transparent 50%);
+            pointer-events: none;
+        }
+
+        .hero-brand {
+            font-size: clamp(1.2rem, 3vw, 1.8rem);
+            letter-spacing: 6px;
+            font-weight: 300;
+            opacity: 0.9;
+            margin-bottom: 1rem;
+            background: linear-gradient(135deg, var(--accent-start), var(--accent-end));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .hero-tagline {
+            font-size: clamp(1rem, 2.5vw, 1.4rem);
+            color: var(--text-secondary);
+            max-width: 700px;
+            margin-bottom: 0.5rem;
+            font-weight: 300;
+        }
+
+        .hero-sub {
+            font-size: 0.95rem;
+            color: var(--text-muted);
+            margin-bottom: 2.5rem;
+        }
+
+        .hero-buttons {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+            justify-content: center;
+        }
+
+        .btn {
+            padding: 0.75rem 2rem;
+            border-radius: 8px;
+            font-size: 1rem;
+            font-weight: 500;
+            cursor: pointer;
+            border: none;
+            transition: transform 0.2s, box-shadow 0.2s;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+        .btn:hover { transform: translateY(-2px); text-decoration: none; }
+
+        .btn-primary {
+            background: linear-gradient(135deg, var(--accent-start), var(--accent-end));
+            color: white;
+            box-shadow: 0 4px 20px rgba(102, 126, 234, 0.3);
+        }
+        .btn-primary:hover { box-shadow: 0 6px 30px rgba(102, 126, 234, 0.45); }
+
+        .btn-secondary {
+            background: var(--bg-card);
+            color: var(--text-primary);
+            border: 1px solid var(--border);
+            backdrop-filter: blur(10px);
+        }
+        .btn-secondary:hover { background: var(--bg-card-hover); }
+
+        .version-badge {
+            display: inline-block;
+            margin-top: 1.5rem;
+            padding: 0.3rem 1rem;
+            border-radius: 20px;
+            font-size: 0.8rem;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            color: var(--text-muted);
+        }
+
+        /* ─── Sections ─── */
+        section { padding: 3.5rem 2rem; max-width: 1100px; margin: 0 auto; }
+
+        .section-title {
+            font-size: clamp(1.5rem, 3vw, 2rem);
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+            text-align: center;
+        }
+
+        .section-subtitle {
+            color: var(--text-secondary);
+            text-align: center;
+            margin-bottom: 2rem;
+            font-size: 1.05rem;
+        }
+
+        /* ─── Features ─── */
+        .features-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .feature-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            padding: 1.8rem;
+            transition: background 0.2s, border-color 0.2s;
+        }
+        .feature-card:hover {
+            background: var(--bg-card-hover);
+            border-color: rgba(102, 126, 234, 0.2);
+        }
+
+        .feature-icon { font-size: 1.6rem; margin-bottom: 0.8rem; }
+
+        .feature-card h3 {
+            font-size: 1.1rem;
+            font-weight: 600;
+            margin-bottom: 0.5rem;
+        }
+
+        .feature-card p {
+            color: var(--text-secondary);
+            font-size: 0.92rem;
+            line-height: 1.5;
+        }
+
+        /* ─── Demo ─── */
+        .demo-section { background: var(--bg-secondary); border-radius: 16px; padding: 3rem 2rem; }
+
+        .demo-wrapper {
+            max-width: 800px;
+            margin: 0 auto;
+            border-radius: 12px;
+            overflow: hidden;
+            border: 1px solid var(--border);
+        }
+
+        .demo-wrapper video {
+            width: 100%;
+            display: block;
+        }
+
+        /* ─── Screenshots ─── */
+        .screenshots-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 1.5rem;
+        }
+
+        .screenshots-grid {
+            grid-template-columns: repeat(2, 1fr);
+        }
+
+        .screenshot-card {
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 12px;
+            overflow: hidden;
+            transition: border-color 0.2s, transform 0.2s;
+            cursor: pointer;
+        }
+
+        /* ─── Lightbox ─── */
+        .lightbox {
+            display: none;
+            position: fixed;
+            inset: 0;
+            z-index: 1000;
+            background: rgba(0, 0, 0, 0.85);
+            backdrop-filter: blur(8px);
+            align-items: center;
+            justify-content: center;
+            padding: 2rem;
+            cursor: pointer;
+        }
+
+        .lightbox.active { display: flex; }
+
+        .lightbox img {
+            max-width: 90vw;
+            max-height: 90vh;
+            border-radius: 8px;
+            box-shadow: 0 8px 40px rgba(0, 0, 0, 0.5);
+        }
+
+        .lightbox-close {
+            position: absolute;
+            top: 1.5rem;
+            right: 2rem;
+            font-size: 2rem;
+            color: white;
+            opacity: 0.7;
+            cursor: pointer;
+            background: none;
+            border: none;
+            font-family: inherit;
+        }
+        .lightbox-close:hover { opacity: 1; }
+
+        .screenshot-card:hover {
+            border-color: rgba(102, 126, 234, 0.3);
+            transform: translateY(-2px);
+        }
+
+        .screenshot-card img {
+            width: 100%;
+            display: block;
+        }
+
+        .screenshot-label {
+            padding: 0.8rem 1rem;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            text-align: center;
+            border-top: 1px solid var(--border);
+        }
+
+        /* ─── Quick Start ─── */
+        .quickstart-section { background: var(--bg-secondary); border-radius: 16px; padding: 3rem 2rem; scroll-margin-top: 1rem; }
+
+        .code-block {
+            background: var(--bg-primary);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 1.2rem 1.5rem;
+            font-family: 'Cascadia Code', 'Fira Code', 'SF Mono', Consolas, monospace;
+            font-size: 0.9rem;
+            overflow-x: auto;
+            position: relative;
+            margin-bottom: 1rem;
+        }
+
+        .code-block .comment { color: #6a9955; }
+        .code-block .command { color: #dcdcaa; }
+        .code-block .string { color: #ce9178; }
+
+        .code-label {
+            font-size: 0.8rem;
+            color: var(--text-muted);
+            margin-bottom: 0.5rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .code-steps {
+            max-width: 650px;
+            margin: 0 auto;
+        }
+
+        .code-step {
+            margin-bottom: 1.5rem;
+        }
+
+        /* ─── Shortcuts ─── */
+        .shortcuts-table {
+            width: 100%;
+            max-width: 500px;
+            margin: 0 auto;
+            border-collapse: collapse;
+        }
+
+        .shortcuts-table th {
+            text-align: left;
+            padding: 0.8rem 1rem;
+            border-bottom: 2px solid var(--border);
+            color: var(--text-secondary);
+            font-weight: 500;
+            font-size: 0.85rem;
+            text-transform: uppercase;
+            letter-spacing: 1px;
+        }
+
+        .shortcuts-table td {
+            padding: 0.7rem 1rem;
+            border-bottom: 1px solid var(--border);
+            font-size: 0.95rem;
+        }
+
+        .shortcuts-table tr:last-child td { border-bottom: none; }
+
+        .key {
+            display: inline-block;
+            background: var(--bg-card);
+            border: 1px solid var(--border);
+            border-radius: 4px;
+            padding: 0.15rem 0.5rem;
+            font-family: 'Cascadia Code', 'Fira Code', monospace;
+            font-size: 0.8rem;
+        }
+
+        /* ─── Permissions ─── */
+        .permissions-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+            gap: 2rem;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+
+        .permission-group h3 {
+            font-size: 1rem;
+            font-weight: 600;
+            margin-bottom: 0.8rem;
+            padding-bottom: 0.5rem;
+            border-bottom: 1px solid var(--border);
+        }
+
+        .permission-group ul {
+            list-style: none;
+            padding: 0;
+        }
+
+        .permission-group li {
+            font-family: 'Cascadia Code', 'Fira Code', monospace;
+            font-size: 0.8rem;
+            color: var(--text-secondary);
+            padding: 0.35rem 0;
+        }
+
+        .permission-group li::before {
+            content: '>';
+            color: var(--accent-start);
+            margin-right: 0.5rem;
+        }
+
+        /* ─── Footer ─── */
+        footer {
+            text-align: center;
+            padding: 3rem 2rem;
+            border-top: 1px solid var(--border);
+            color: var(--text-muted);
+            font-size: 0.9rem;
+        }
+
+        .footer-links {
+            display: flex;
+            gap: 2rem;
+            justify-content: center;
+            margin-bottom: 1rem;
+        }
+
+        .footer-links a { color: var(--text-secondary); }
+        .footer-links a:hover { color: var(--accent-start); }
+
+        /* ─── Responsive ─── */
+        @media (max-width: 640px) {
+            section { padding: 3rem 1.2rem; }
+            .features-grid { grid-template-columns: 1fr; }
+            .screenshots-grid { grid-template-columns: 1fr !important; }
+            .hero { min-height: 80vh; }
+            .hero-buttons { flex-direction: column; align-items: center; }
+            .btn { width: 100%; max-width: 280px; justify-content: center; }
+            .permissions-grid { grid-template-columns: 1fr; }
+        }
+    </style>
+</head>
+<body>
+
+    <!-- Hero -->
+    <div class="hero">
+        <div class="hero-brand">[ E N T R A &nbsp; P I M ]</div>
+        <p class="hero-tagline">
+            Manage Microsoft Entra PIM roles from your terminal.
+        </p>
+        <p class="hero-sub">
+            Entra ID roles, Azure Resource roles, and Groups PIM — one PowerShell command.
+        </p>
+        <div class="hero-buttons">
+            <a href="#quickstart" class="btn btn-primary">Install Now</a>
+            <a href="https://github.com/markorr321/Entra-PIM" class="btn btn-secondary">
+                <svg width="18" height="18" viewBox="0 0 16 16" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>
+                GitHub
+            </a>
+        </div>
+        <span class="version-badge">v2.3.1 &middot; PowerShell 7.0+</span>
+    </div>
+
+    <!-- Features -->
+    <section>
+        <h2 class="section-title">Features</h2>
+        <p class="section-subtitle">Everything you need to manage PIM roles, in one tool.</p>
+
+        <div class="features-grid">
+            <div class="feature-card">
+                <div class="feature-icon">&#x1F510;</div>
+                <h3>Full PIM Support</h3>
+                <p>Manage Entra ID roles, Azure Resource roles, and Groups PIM memberships from a single interactive console.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">&#x1F6E1;</div>
+                <h3>Secure by Design</h3>
+                <p>Fresh browser-based authentication on every launch. Supports Conditional Access policies, authentication context, and automatic step-up MFA for privileged roles.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">&#x1F310;</div>
+                <h3>Cross-Platform</h3>
+                <p>Works on Windows and macOS. No cached tokens — every session authenticates through your identity provider with full policy enforcement.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">&#x23F1;</div>
+                <h3>Smart Duration</h3>
+                <p>If requested duration exceeds a role's policy maximum, each role activates for its individual policy limit.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">&#x2328;</div>
+                <h3>Interactive TUI</h3>
+                <p>Navigate with keyboard shortcuts, back navigation on every menu, and live countdown timers on active roles.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">&#x1F504;</div>
+                <h3>Auto-Updates</h3>
+                <p>Automatically checks PowerShell Gallery for new versions and prompts to update with the correct install method.</p>
+            </div>
+            <div class="feature-card">
+                <div class="feature-icon">&#x1F4E6;</div>
+                <h3>Zero Config</h3>
+                <p>Auto-installs required modules on first run. No app registration needed — just install and go.</p>
+            </div>
+        </div>
+    </section>
+
+    <!-- Demo -->
+    <section>
+        <div class="demo-section">
+            <h2 class="section-title">See It in Action</h2>
+            <p class="section-subtitle">Full activation workflow — authentication, role selection, and activation.</p>
+            <div class="demo-wrapper">
+                <iframe width="100%" style="aspect-ratio: 16/9;" src="https://www.youtube.com/embed/JP0uhCYQ858" title="Entra PIM Demo" frameborder="0" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+            </div>
+        </div>
+    </section>
+
+    <!-- Screenshots -->
+    <section>
+        <h2 class="section-title">Screenshots</h2>
+        <p class="section-subtitle">The interactive console experience.</p>
+        <div class="screenshots-grid">
+            <div class="screenshot-card" onclick="openLightbox(this.querySelector('img'))">
+                <img src="step1-workflow.png" alt="Workflow Selector - Choose between Entra ID, Group, or Azure roles" loading="lazy">
+                <div class="screenshot-label">Workflow Selector</div>
+            </div>
+            <div class="screenshot-card" onclick="openLightbox(this.querySelector('img'))">
+                <img src="step2-action.png" alt="Action Menu - Activate or Deactivate roles" loading="lazy">
+                <div class="screenshot-label">Action Menu</div>
+            </div>
+            <div class="screenshot-card" onclick="openLightbox(this.querySelector('img'))">
+                <img src="step3-roles.png" alt="Role Selection - Choose roles to activate" loading="lazy">
+                <div class="screenshot-label">Role Selection</div>
+            </div>
+            <div class="screenshot-card" onclick="openLightbox(this.querySelector('img'))">
+                <img src="step4-activation.png" alt="Activation Results - Roles activated with step-up MFA" loading="lazy">
+                <div class="screenshot-label">Activation Results</div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Quick Start -->
+    <section>
+        <div id="quickstart" class="quickstart-section">
+            <h2 class="section-title">Quick Start</h2>
+            <p class="section-subtitle">Up and running in two commands.</p>
+
+            <div class="code-steps">
+                <div class="code-step">
+                    <div class="code-label">Install</div>
+                    <div class="code-block">
+                        <span class="command">Install-Module</span> <span class="string">-Name Entra-PIM</span> -Repository PSGallery
+                    </div>
+                </div>
+
+                <div class="code-step">
+                    <div class="code-label">Run</div>
+                    <div class="code-block">
+                        <span class="command">Start-EntraPIM</span>
+                    </div>
+                </div>
+
+                <div class="code-step">
+                    <div class="code-label">Optional: Custom App Registration</div>
+                    <div class="code-block">
+                        <span class="comment"># Configure once, use anytime</span><br>
+                        <span class="command">Configure-EntraPIM</span>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </section>
+
+    <!-- Keyboard Shortcuts -->
+    <section>
+        <h2 class="section-title">Keyboard Shortcuts</h2>
+        <p class="section-subtitle">Navigate the TUI with ease.</p>
+
+        <table class="shortcuts-table">
+            <thead>
+                <tr><th>Shortcut</th><th>Action</th></tr>
+            </thead>
+            <tbody>
+                <tr><td><span class="key">&uarr;</span> <span class="key">&darr;</span></td><td>Navigate</td></tr>
+                <tr><td><span class="key">Space</span></td><td>Toggle selection</td></tr>
+                <tr><td><span class="key">Ctrl+A</span></td><td>Select all</td></tr>
+                <tr><td><span class="key">Ctrl+D</span></td><td>Deselect all</td></tr>
+                <tr><td><span class="key">Enter</span></td><td>Confirm</td></tr>
+                <tr><td><span class="key">Esc</span></td><td>Step back</td></tr>
+                <tr><td><span class="key">Ctrl+H</span></td><td>Help</td></tr>
+                <tr><td><span class="key">Ctrl+Q</span></td><td>Exit</td></tr>
+            </tbody>
+        </table>
+    </section>
+
+    <!-- Permissions -->
+    <section>
+        <h2 class="section-title">API Permissions</h2>
+        <p class="section-subtitle">Required only when using a custom app registration.</p>
+
+        <div class="permissions-grid">
+            <div class="permission-group">
+                <h3>Entra ID &amp; Azure Roles</h3>
+                <ul>
+                    <li>User.Read</li>
+                    <li>RoleAssignmentSchedule.ReadWrite.Directory</li>
+                    <li>RoleEligibilitySchedule.ReadWrite.Directory</li>
+                    <li>RoleManagement.Read.Directory</li>
+                    <li>RoleManagementPolicy.Read.Directory</li>
+                </ul>
+            </div>
+            <div class="permission-group">
+                <h3>Groups PIM (Additional)</h3>
+                <ul>
+                    <li>PrivilegedAssignmentSchedule.ReadWrite.AzureADGroup</li>
+                    <li>PrivilegedEligibilitySchedule.Read.AzureADGroup</li>
+                    <li>RoleManagementPolicy.Read.AzureADGroup</li>
+                </ul>
+            </div>
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer>
+        <div class="footer-links">
+            <a href="https://github.com/markorr321/Entra-PIM">GitHub</a>
+            <a href="https://www.powershellgallery.com/packages/Entra-PIM">PowerShell Gallery</a>
+            <a href="https://github.com/markorr321/Entra-PIM/blob/main/LICENSE">License</a>
+        </div>
+        <p>by Mark Orr</p>
+    </footer>
+
+    <!-- Lightbox -->
+    <div class="lightbox" id="lightbox" onclick="closeLightbox()">
+        <button class="lightbox-close" onclick="closeLightbox()">&times;</button>
+        <img id="lightbox-img" src="" alt="">
+    </div>
+
+    <script>
+        function openLightbox(img) {
+            var lb = document.getElementById('lightbox');
+            document.getElementById('lightbox-img').src = img.src;
+            document.getElementById('lightbox-img').alt = img.alt;
+            lb.classList.add('active');
+        }
+        function closeLightbox() {
+            document.getElementById('lightbox').classList.remove('active');
+        }
+        document.addEventListener('keydown', function(e) {
+            if (e.key === 'Escape') closeLightbox();
+        });
+    </script>
+
+</body>
+</html>
