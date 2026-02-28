@@ -3,8 +3,8 @@
 
 param([string]$OutputPath = ".\release")
 
-if (-not (Test-Path $OutputPath)) { 
-    New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null 
+if (-not (Test-Path $OutputPath)) {
+    New-Item -ItemType Directory -Path $OutputPath -Force | Out-Null
 }
 
 $modulePath = $PSScriptRoot
