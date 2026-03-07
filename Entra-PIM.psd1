@@ -6,7 +6,7 @@
     RootModule = 'Entra-PIM.psm1'
 
     # Version number of this module (SemVer format for PSResourceGet)
-    ModuleVersion = '2.3.3'
+    ModuleVersion = '2.3.4'
 
     # ID used to uniquely identify this module
     GUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
@@ -58,6 +58,10 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+## 2.3.4
+- Fixed Linux color rendering issue where console reports invalid (-1) color values
+- Defensive Write-Host handling for cross-platform terminal compatibility
+
 ## 2.3.3
 - Updated module and README descriptions to highlight key features
 - Fixed Enter key exiting app when no workflow is selected

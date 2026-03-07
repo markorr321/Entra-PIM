@@ -177,6 +177,11 @@ The version check:
 [System.Environment]::SetEnvironmentVariable('ENTRAPIM_DISABLE_UPDATE_CHECK', 'true', 'User')
 ```
 
+## What's New in 2.3.4
+
+- **Linux Color Fix**: Fixed console color rendering on Linux where terminals report invalid (-1) color values
+- **Cross-Platform Terminal Compatibility**: Defensive Write-Host handling ensures consistent display across all platforms
+
 ## What's New in 2.3.3
 
 - **Enter Key Fix**: Pressing Enter with no workflow selected no longer exits the app

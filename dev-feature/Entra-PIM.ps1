@@ -12,7 +12,7 @@ $script:CustomClientId = $ClientId
 $script:CustomTenantId = $TenantId
 
 # ========================= Version =========================
-$script:Version = "2.3.3"
+$script:Version = "2.3.4"
 
 # ========================= Cross-Platform Keyboard Shortcuts =========================
 # Detect if running on macOS (use built-in $IsMacOS variable if available)
@@ -263,7 +263,7 @@ public class PIMBrowserAuth
 </head>
 <body>
     <div class='container'>
-        <div class='brand'>[ E N T R A &nbsp; P I M ] <span class='version'>v2.3.3</span></div>
+        <div class='brand'>[ E N T R A &nbsp; P I M ] <span class='version'>v2.3.4</span></div>
         <div class='checkmark'>&#10003;</div>
         <h1>Authentication Successful</h1>
         <p>You can close this window and return to PowerShell.</p>
@@ -288,7 +288,7 @@ public class PIMBrowserAuth
 </head>
 <body>
     <div class='container'>
-        <div class='brand'>[ E N T R A &nbsp; P I M ] <span class='version'>v2.3.3</span></div>
+        <div class='brand'>[ E N T R A &nbsp; P I M ] <span class='version'>v2.3.4</span></div>
         <div class='icon'>&#10005;</div>
         <h1>Authentication Failed</h1>
         <p>Please close this window and try again.</p>
