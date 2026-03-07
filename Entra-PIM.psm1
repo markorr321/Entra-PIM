@@ -296,7 +296,7 @@ function Show-UpdateNotification {
                 $installPath = $installedViaPSResource.InstalledLocation
                 # AllUsers paths: Windows="Program Files", macOS/Linux="/usr/local"
                 $scope = if ($installPath -match 'Program Files|/usr/local') { 'AllUsers' } else { 'CurrentUser' }
-                Update-PSResource -Name Entra-PIM -Scope $scope -Confirm:$false
+                Update-PSResource -Name Entra-PIM -Scope $scope -TrustRepository -Confirm:$false
             }
             elseif ($installedViaPowerShellGet) {
                 # Installed via PowerShellGet, use Update-Module
