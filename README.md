@@ -177,6 +177,12 @@ The version check:
 [System.Environment]::SetEnvironmentVariable('ENTRAPIM_DISABLE_UPDATE_CHECK', 'true', 'User')
 ```
 
+## What's New in 2.3.3
+
+- **Enter Key Fix**: Pressing Enter with no workflow selected no longer exits the app
+- **Updated Platform Docs**: Documentation now correctly lists Linux alongside Windows and macOS
+- **Updated Descriptions**: Module and README descriptions now highlight all key features
+
 ## What's New in 2.3.1
 
 - **Groups PIM Support**: Activate/deactivate Entra Groups PIM memberships (member and owner roles)
