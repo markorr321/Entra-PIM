@@ -21,7 +21,7 @@
     Copyright = '(c) 2025. All rights reserved.'
 
     # Description of the functionality provided by this module
-    Description = 'Manage Microsoft Entra PIM roles for both Entra ID and Azure Resources with an interactive console experience. Features browser-based authentication with ForceLogin, cross-platform support (Windows/macOS), automatic step-up MFA handling, one-command activation/deactivation of eligible roles, and auto-installation of dependencies. Just run Start-EntraPIM - no app registration or complex configuration required.'
+    Description = 'PowerShell module for managing Microsoft Entra PIM (Privileged Identity Management) role activations and deactivations through an interactive console experience. Supports Entra ID roles, Azure Resource roles, and Groups PIM with browser-based authentication. Features automatic step-up MFA handling, one-command activation/deactivation, and auto-installation of dependencies. Cross-platform compatible with Windows, macOS, and Linux. Just run Start-EntraPIM - works out of the box with no configuration, or bring your own app registration for full control.'
 
     # Minimum version of the PowerShell engine required by this module
     PowerShellVersion = '7.0'

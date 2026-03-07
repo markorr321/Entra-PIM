@@ -1,6 +1,6 @@
 # Entra-PIM
 
-PowerShell module for managing Microsoft Entra PIM (Privileged Identity Management) role activations and deactivations through an interactive console experience. Supports **Entra ID roles**, **Azure Resource roles**, and **Groups PIM** with browser-based authentication. Features automatic step-up MFA handling, one-command activation/deactivation, and auto-installation of dependencies. Cross-platform compatible with **Windows**, **macOS**, and **Linux**. Just run `Start-EntraPIM` — no app registration or complex configuration required.
+PowerShell module for managing Microsoft Entra PIM (Privileged Identity Management) role activations and deactivations through an interactive console experience. Supports **Entra ID roles**, **Azure Resource roles**, and **Groups PIM** with browser-based authentication. Features automatic step-up MFA handling, one-command activation/deactivation, and auto-installation of dependencies. Cross-platform compatible with **Windows**, **macOS**, and **Linux**. Just run `Start-EntraPIM` — works out of the box with no configuration, or bring your own app registration for full control.
 
 ## Features
 
