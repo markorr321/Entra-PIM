@@ -316,11 +316,22 @@ function Show-UpdateNotification {
             }
 
             Write-Host ""
-            Write-Host "Update complete! Please restart PowerShell and run Start-EntraPIM again." -ForegroundColor Green
+            Write-Host "Update complete!" -ForegroundColor Green
             Write-Host ""
-            Write-Host "Press Enter to Exit"
-            $null = [Console]::ReadLine()
-            exit
+            
+            if ($IsWindows) {
+                Write-Host "Please restart PowerShell and run Start-EntraPIM again." -ForegroundColor Green
+                Write-Host ""
+                Write-Host "Press Enter to Exit"
+                $null = [Console]::ReadLine()
+                exit
+            }
+            else {
+                # macOS/Linux - return to prompt to avoid shell session cleanup messages
+                Write-Host "Please close this window and reopen PowerShell, then run Start-EntraPIM again." -ForegroundColor Yellow
+                Write-Host ""
+                return
+            }
         }
         catch {
             Write-Host ""
