@@ -6,7 +6,7 @@
     RootModule = 'Entra-PIM.psm1'
 
     # Version number of this module (SemVer format for PSResourceGet)
-    ModuleVersion = '2.3.4'
+    ModuleVersion = '2.3.5'
 
     # ID used to uniquely identify this module
     GUID = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890'
@@ -58,6 +58,10 @@
 
             # ReleaseNotes of this module
             ReleaseNotes = @'
+## 2.3.5
+- Fixed macOS/Linux update flow closing terminal window unexpectedly
+- Platform-aware post-update behavior (exit on Windows, return on macOS/Linux)
+
 ## 2.3.4
 - Fixed Linux color rendering issue where console reports invalid (-1) color values
 - Defensive Write-Host handling for cross-platform terminal compatibility
@@ -223,8 +227,8 @@
 # SIG # Begin signature block
 # MIIVpQYJKoZIhvcNAQcCoIIVljCCFZICAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAeLai337UeNJ8c
-# h+Wh66etgrb/qSnXTrzO3+NMenUnmaCCEeAwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCAReAqqrIfuob/g
+# BvFIYjbmSsAvXxp0HWOT3zCKt8VEY6CCEeAwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -324,17 +328,17 @@
 # MSswKQYDVQQDEyJTZWN0aWdvIFB1YmxpYyBDb2RlIFNpZ25pbmcgQ0EgUjM2AhEA
 # h4S8tN9yByR3E9jATIZw9DANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEM
 # MQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQB
-# gjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCBxY3kVfUKbMkG1
-# zWXcXs3P6dS16bWS/We5P1urQ1bNxjANBgkqhkiG9w0BAQEFAASCAgCrPUffNoOY
-# Qa7ulmmM2tM3TLwdN6e+keA4zImz9PRBqpILC4E8zeMjkUZmC8S1eFh7lCJTuq0J
-# pcUu3/++mVPjDzzc1RAvL4oNRNkgaF1dySfh1Mbt/gPFuUwDxpzT4YHthmHJLz7z
-# 9iWzLdoamVIOFkWkv8HFUjgDdfhU3NmxxYRyQNmcZVBzHtYQci0sVQFJHJlRff3x
-# EREXua/aC7oDp45Vz0PdMjxiCwnUQIduLNpe5rQDdb6mAeplKKlko12ZOIXMT1i5
-# 2uINabFX/kbbHDGTTxxFxltQODZ5bNc2oyqHMi9YRa552vSAicdw+CLzi1ng4OBJ
-# iOplhHKCOu0GcTPE9jV3VpEvej6MJ3tAnE1a/H5uumD9ej8iWg1lLMJkcYj2LJI9
-# 7rKMLsXWb7WnQCNUj4ukMwHb+89YU+K3U8XvauHw794t0LVNkR8zVt7eemL8QZFV
-# Czkc1OpbeSklZtg4WxqUyDlU2/96M46F62gMfhnmPwPLdJbKS3sm161xChJkgrA5
-# 4161u3uWOX8n/yRmTv13QdQ2FbSMJtgg7FFZjkQBO+kGSku0j8BCDjU8F8l5LXIT
-# OUBniA7tldiMIapFdeV33WNrPACo/0UFIzum5WccCxajIqGu1K97RWmPnre9XWZ4
-# axw//lxaRRFslM1SNYuHvZTdi+5Jhy/cww==
+# gjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCDcGwjvmXQ4VVNG
+# hSxNVcsGqvVWU2j7hadXKuQouD4kLDANBgkqhkiG9w0BAQEFAASCAgAPDJLMvT+B
+# XgHn/BWTszStx42SMOHLGaCTS//Cf187hN4jZ5+dWUE/kJjMLzlpMnPjq7xBuD1r
+# 3kpH8YoKzdmEdC7hSlhq0PvKnpDsRJv64aAOcm9cyov7qRIWCv/4CobBKfCTpVQA
+# VOfsA7slw4HZoMgnTgAk0JKBMRje3R8llO5F46erJn9cqGFmJim7Q2bGkGuGzOy+
+# WfSi60SSybpZQOTpJ6BQuTzeVKhXAPxVUoAyRJsZJzbGkLRmHcwyJpuvTt5/zXwr
+# AJOG/MHsIiMsLAkW7qKj4/f8MLpOR4lsXJbqEYTN6j1rW+KafSyxR6dgPJeR7Sxp
+# by4j7+8c+5kOcLhXnhy2wZ0exIUKfmqv3ciDpOfdkGpRknIJztlGu9mKJ/H3TxmP
+# VAyqRioPJa99W+2YOwo6urXAti/3j9VBpTPClFK/3wxhD2QsEX6E/eRUyr71pN91
+# KnW8dovPLUvfXz8lJYn7S8V6DvTE+GMWCraUZMiqAXwQWwljMbV7UGlwiKIoIzTR
+# IgfMSCMgwkY82Nf5m+Njv6YM/VKgbK1JJxGZojXj2wmlHKvEGHekTrtNdEyP/aV1
+# tOcHbRBeY66BweToS/uvNjtx38qdve3EKG6OVsrWD8OeB+y1b6rOs4yR3NexRp7a
+# sGUV+a9Gjh2jlsnOSR9dvlM22AA5c0Zt6g==
 # SIG # End signature block

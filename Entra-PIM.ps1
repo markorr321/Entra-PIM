@@ -12,7 +12,7 @@ $script:CustomClientId = $ClientId
 $script:CustomTenantId = $TenantId
 
 # ========================= Version =========================
-$script:Version = "2.3.4"
+$script:Version = "2.3.5"
 
 # ========================= Cross-Platform Keyboard Shortcuts =========================
 # Detect if running on macOS (use built-in $IsMacOS variable if available)
@@ -263,7 +263,7 @@ public class PIMBrowserAuth
 </head>
 <body>
     <div class='container'>
-        <div class='brand'>[ E N T R A &nbsp; P I M ] <span class='version'>v2.3.4</span></div>
+        <div class='brand'>[ E N T R A &nbsp; P I M ] <span class='version'>v2.3.5</span></div>
         <div class='checkmark'>&#10003;</div>
         <h1>Authentication Successful</h1>
         <p>You can close this window and return to PowerShell.</p>
@@ -288,7 +288,7 @@ public class PIMBrowserAuth
 </head>
 <body>
     <div class='container'>
-        <div class='brand'>[ E N T R A &nbsp; P I M ] <span class='version'>v2.3.4</span></div>
+        <div class='brand'>[ E N T R A &nbsp; P I M ] <span class='version'>v2.3.5</span></div>
         <div class='icon'>&#10005;</div>
         <h1>Authentication Failed</h1>
         <p>Please close this window and try again.</p>
@@ -7442,8 +7442,8 @@ do {
 # SIG # Begin signature block
 # MIIVpQYJKoZIhvcNAQcCoIIVljCCFZICAQExDzANBglghkgBZQMEAgEFADB5Bgor
 # BgEEAYI3AgEEoGswaTA0BgorBgEEAYI3AgEeMCYCAwEAAAQQH8w7YFlLCE63JNLG
-# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCDPdtlWrGSvZo46
-# HnamUu6f/G5NaP9VsOY8XlNhotQVm6CCEeAwggVvMIIEV6ADAgECAhBI/JO0YFWU
+# KX7zUQIBAAIBAAIBAAIBAAIBADAxMA0GCWCGSAFlAwQCAQUABCCZjwN5NSTRQ1jt
+# BS/grFWHhOWO7vJ+bxiMaoeeeFDHjaCCEeAwggVvMIIEV6ADAgECAhBI/JO0YFWU
 # jTanyYqJ1pQWMA0GCSqGSIb3DQEBDAUAMHsxCzAJBgNVBAYTAkdCMRswGQYDVQQI
 # DBJHcmVhdGVyIE1hbmNoZXN0ZXIxEDAOBgNVBAcMB1NhbGZvcmQxGjAYBgNVBAoM
 # EUNvbW9kbyBDQSBMaW1pdGVkMSEwHwYDVQQDDBhBQUEgQ2VydGlmaWNhdGUgU2Vy
@@ -7543,17 +7543,17 @@ do {
 # MSswKQYDVQQDEyJTZWN0aWdvIFB1YmxpYyBDb2RlIFNpZ25pbmcgQ0EgUjM2AhEA
 # h4S8tN9yByR3E9jATIZw9DANBglghkgBZQMEAgEFAKCBhDAYBgorBgEEAYI3AgEM
 # MQowCKACgAChAoAAMBkGCSqGSIb3DQEJAzEMBgorBgEEAYI3AgEEMBwGCisGAQQB
-# gjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCyTHCdQL76b6jE
-# Wh3iU3Lp+kPW08JwMNdz4fJBuARNbDANBgkqhkiG9w0BAQEFAASCAgCtPIkRmqPm
-# 8pfMoCyWFrP1k/9VXrjQ3nxewIwWeFdTSOFptjqo8VrD+7UnC32RILZKL9kI06MD
-# m0CdmBeQ3UzS3R4z9DUR2tf43DaSUN6XQUTwgSh8CwORj7ui/XgAVnjCwbGUBNKx
-# 0OaLxvBHII9CNn1Or4iWDbVqypY8fzXsLIow+Mz9hvslpIoPe+/mCnSwPuImnBG4
-# YEuxF+Jqk4GlJVd38DQpLdaqKTttBcPXfPsuaYyDOvShW6YMYtYlZBhQ7TbC5/Hr
-# 2ZzneUZyLBAyGviU1vUxc74A6EEdlgsq8WPYYZjeqXWy/WEe+ppjtIyjRXdOUaz6
-# rOC5y6CUeZGQ28Qzx4IBBgbZUeuvdXbDgZuJHExJlsZIC9Zs8YpiTmNEGahDokoI
-# nQdYygg5KouMTnOeUnvleIc3tU2mAqsFn9tf7MpAbbfIpMIs3tjsFCfqoAMoySAF
-# 2r7qijjusRErMH6pwHX5xYLKM2FphRWHZZHz6hcgRVWQ1+rORkqC6e76FBDsn7wR
-# wKNaYr77uHUQgHrznZSZdCXXW1zCG7DT6ud9tlSJld/4M7oXh7z5SfMZBcBF7qM2
-# QHr2wmjGPpysH5EXnKp9+2TT7PjrC8GND2KJls/bMNjQCOFlMmrWEjE3SDWrJe3o
-# Al19jiMRjPNwKuiCeckdF7HqJzjkQa+MCQ==
+# gjcCAQsxDjAMBgorBgEEAYI3AgEVMC8GCSqGSIb3DQEJBDEiBCCTVrfYBv/tzgaQ
+# QqcMqbvOLACTykvCIcNGCNWZhnJT4DANBgkqhkiG9w0BAQEFAASCAgAydaTsxhIH
+# l/LiFfKJLXLpG1tXEPenT7tJYsYKt0B9p+oRfKxvnecwJYw3MLh6ZXQD7Gq2NUAp
+# ko1bUVH8RxUy3mno8eh9nHYm+rIlJAWpvdHOV6KGa3sjJemDfthHkxP0hF+aWdDw
+# cshRoBwzRGuCLe3i7Tl1oTk34KDVEF1Xp8sZy1ElTfe+U/0prPwvJzZaLLMPl41W
+# RMD/q4WU/PT9nU4nsN+sJO4aJPLm28CQDSRktaHq4/3jk4oLe7nr94xbOm+0Upaq
+# L6p9IBSHjLktM2HrHKFfVGMkGH9xqLZTxJw6eUjPxmbs4dOdq/p5ME+ijanDUiRm
+# 5l7Nyduje9/PP3HUTbAOV9k9fKM3iVmJmP1rJ0AZ8NBHH4zlRs1Umb75RANqIvLl
+# nslKcTOP/EovXMBCUjIb85e1W51OMuhe9BqnrGzQZKhYBlApie6E3k7i9g5OTuvp
+# u2kjoUL2t4EQYolfcPXdIIPnRVu/T/0GgoGZ0ANrWsNNo+SSS5FbGyuUvW5fYdU6
+# W0OTd53YsdZyE2NjDZJtV5KnQb3JpRV4nxAX51nfQW9gTyGEAlgur3xhnXUfb0pF
+# IVC18sq/jpLgjjXgUV6m4aVBB3drMHChYLiQI91nqVzidNcSg7q4Q92zRKOBZF7M
+# zT3aTSS8qKhiLC/CWqeECiQsgJKv9EGPkA==
 # SIG # End signature block
