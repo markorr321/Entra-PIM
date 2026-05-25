@@ -1866,17 +1866,17 @@ function Show-PIMGlobalHeader {
         )
 
         # Linux/host combinations can report -1 for console colors; Write-Host rejects that value.
-        if ($null -ne $ForegroundColor -and [int]$ForegroundColor -lt 0) { $ForegroundColor = $null }
-        if ($null -ne $BackgroundColor -and [int]$BackgroundColor -lt 0) { $BackgroundColor = $null }
+        $effectiveForegroundColor = if ([int]$ForegroundColor -ge 0) { $ForegroundColor } else { $null }
+        $effectiveBackgroundColor = if ([int]$BackgroundColor -ge 0) { $BackgroundColor } else { $null }
 
-        if ($null -ne $ForegroundColor -and $null -ne $BackgroundColor) {
-            Write-Host $Object -ForegroundColor $ForegroundColor -BackgroundColor $BackgroundColor -NoNewline:$NoNewline
+        if ($null -ne $effectiveForegroundColor -and $null -ne $effectiveBackgroundColor) {
+            Write-Host $Object -ForegroundColor $effectiveForegroundColor -BackgroundColor $effectiveBackgroundColor -NoNewline:$NoNewline
         }
-        elseif ($null -ne $ForegroundColor) {
-            Write-Host $Object -ForegroundColor $ForegroundColor -NoNewline:$NoNewline
+        elseif ($null -ne $effectiveForegroundColor) {
+            Write-Host $Object -ForegroundColor $effectiveForegroundColor -NoNewline:$NoNewline
         }
-        elseif ($null -ne $BackgroundColor) {
-            Write-Host $Object -BackgroundColor $BackgroundColor -NoNewline:$NoNewline
+        elseif ($null -ne $effectiveBackgroundColor) {
+            Write-Host $Object -BackgroundColor $effectiveBackgroundColor -NoNewline:$NoNewline
         }
         else {
             Write-Host $Object -NoNewline:$NoNewline
